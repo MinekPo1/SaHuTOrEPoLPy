@@ -1,0 +1,247 @@
+{
+  "pos": [
+    0,
+    0
+  ],
+  "type": "root",
+  "children": [
+    {
+      "type": "var_def",
+      "name": "S__",
+      "pos": [
+        1,
+        5
+      ]
+    },
+    {
+      "type": "func_def",
+      "name": "f__c",
+      "args": [
+        "s__n"
+      ],
+      "children": [
+        {
+          "type": "var_def",
+          "name": "_s_t",
+          "pos": [
+            3,
+            8
+          ]
+        },
+        {
+          "type": "var_set",
+          "name": "_s_t",
+          "value": {
+            "type": "multi_expression",
+            "expressions": [
+              {
+                "type": "literal_expression",
+                "value": {
+                  "type": "s",
+                  "value": "Hello "
+                },
+                "pos": [
+                  4,
+                  25
+                ]
+              },
+              {
+                "type": "literal_expression",
+                "value": {
+                  "type": "s",
+                  "value": "!"
+                },
+                "pos": [
+                  4,
+                  25
+                ]
+              },
+              {
+                "type": "var_expression",
+                "name": "s__n",
+                "pos": [
+                  4,
+                  25
+                ]
+              }
+            ],
+            "pos": [
+              4,
+              25
+            ]
+          },
+          "pos": [
+            4,
+            25
+          ]
+        },
+        {
+          "type": "method_call",
+          "name": "S__-m__w",
+          "args": [
+            {
+              "type": "var_expression",
+              "name": "_s_t",
+              "pos": [
+                5,
+                16
+              ]
+            }
+          ],
+          "pos": [
+            5,
+            16
+          ]
+        }
+      ],
+      "pos": [
+        2,
+        11
+      ]
+    },
+    {
+      "type": "func_def",
+      "name": "f__s",
+      "args": [
+        "s__n"
+      ],
+      "children": [
+        {
+          "type": "var_def",
+          "name": "f__r",
+          "pos": [
+            8,
+            8
+          ]
+        },
+        {
+          "type": "var_set",
+          "name": "f__r",
+          "value": {
+            "type": "function_call",
+            "name": "s__n-f__m",
+            "args": [
+              {
+                "type": "literal_expression",
+                "value": {
+                  "type": "i",
+                  "value": 0
+                },
+                "pos": [
+                  9,
+                  23
+                ]
+              },
+              {
+                "type": "literal_expression",
+                "value": {
+                  "type": "i",
+                  "value": -1
+                },
+                "pos": [
+                  9,
+                  23
+                ]
+              }
+            ],
+            "pos": [
+              9,
+              23
+            ]
+          },
+          "pos": [
+            9,
+            23
+          ]
+        },
+        {
+          "type": "method_call",
+          "name": "f__r",
+          "args": [
+            {
+              "type": "var_expression",
+              "name": "f__c",
+              "pos": [
+                10,
+                12
+              ]
+            }
+          ],
+          "pos": [
+            10,
+            12
+          ]
+        }
+      ],
+      "pos": [
+        7,
+        11
+      ]
+    },
+    {
+      "type": "method_call",
+      "name": "S__-m__w",
+      "args": [
+        {
+          "type": "literal_expression",
+          "value": {
+            "type": "s",
+            "value": "Whats your name?\n"
+          },
+          "pos": [
+            12,
+            30
+          ]
+        }
+      ],
+      "pos": [
+        12,
+        30
+      ]
+    },
+    {
+      "type": "var_def",
+      "name": "f__r",
+      "pos": [
+        13,
+        6
+      ]
+    },
+    {
+      "type": "var_set",
+      "name": "f__r",
+      "value": {
+        "type": "function_call",
+        "name": "S__-f__r",
+        "args": [],
+        "pos": [
+          14,
+          16
+        ]
+      },
+      "pos": [
+        14,
+        16
+      ]
+    },
+    {
+      "type": "method_call",
+      "name": "f__r",
+      "args": [
+        {
+          "type": "var_expression",
+          "name": "f__s",
+          "pos": [
+            15,
+            10
+          ]
+        }
+      ],
+      "pos": [
+        15,
+        10
+      ]
+    }
+  ],
+  "type_defs": {}
+}

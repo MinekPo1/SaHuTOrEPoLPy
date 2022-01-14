@@ -1,0 +1,101 @@
+children:
+- name: S__
+  pos: !!python/tuple
+  - 1
+  - 5
+  type: var_def
+- args:
+  - s__n
+  children:
+  - name: s__t
+    pos: !!python/tuple
+    - 3
+    - 8
+    type: var_def
+  - name: s__t
+    pos: !!python/tuple
+    - 4
+    - 25
+    type: var_set
+    value:
+      expressions:
+      - pos: &id001 !!python/tuple
+        - 4
+        - 25
+        type: literal_expression
+        value:
+          type: s
+          value: 'Hello '
+      - name: s__n
+        pos: *id001
+        type: var_expression
+      - pos: *id001
+        type: literal_expression
+        value:
+          type: s
+          value: '!'
+      pos: *id001
+      type: multi_expression
+  - args:
+    - name: s__t
+      pos: !!python/tuple
+      - 5
+      - 16
+      type: var_expression
+    name: S__-m__w
+    pos: !!python/tuple
+    - 5
+    - 16
+    type: method_call
+  name: f__c
+  pos: !!python/tuple
+  - 2
+  - 11
+  type: func_def
+- args:
+  - pos: !!python/tuple
+    - 7
+    - 30
+    type: literal_expression
+    value:
+      type: s
+      value: 'Whats your name?
+
+        '
+  name: S__-m__w
+  pos: !!python/tuple
+  - 7
+  - 30
+  type: method_call
+- name: f__r
+  pos: !!python/tuple
+  - 8
+  - 6
+  type: var_def
+- name: f__r
+  pos: !!python/tuple
+  - 9
+  - 16
+  type: var_set
+  value:
+    name: S__-f__r
+    pos: !!python/tuple
+    - 9
+    - 16
+    type: var_expression
+- args:
+  - name: f__c
+    pos: !!python/tuple
+    - 10
+    - 10
+    type: var_expression
+  name: f__r
+  pos: !!python/tuple
+  - 10
+  - 10
+  type: method_call
+pos: !!python/tuple
+- 0
+- 0
+type: root
+type_defs: {}
