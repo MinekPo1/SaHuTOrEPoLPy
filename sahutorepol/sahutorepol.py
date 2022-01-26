@@ -2,9 +2,9 @@ from typing import Literal, overload
 import re
 from simple_warnings import catch_warnings, warn, print_warning
 
-from Types import NamespaceContext
-import Types
-import TypeHints
+from sahutorepol.Types import NamespaceContext
+import sahutorepol.Types as Types
+import sahutorepol.TypeHints as TypeHints
 
 
 class SaHuTOrEPoLError(Exception):

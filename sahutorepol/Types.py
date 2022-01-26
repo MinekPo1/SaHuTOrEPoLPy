@@ -4,7 +4,7 @@ import re
 from typing import IO, TYPE_CHECKING, Any, Callable, ClassVar, Generic,\
 	Literal, Optional, Protocol, Type as LType, TypeVar, overload
 from typing import TypeAlias
-import warnings
+import simple_warnings as warnings
 import sys
 
 
@@ -184,6 +184,7 @@ builtin_namespace.__enter__()
 
 for name in "s i n b S q t f m".split():
 	builtin_namespace.types[name] = _FutureType(name)  # type:ignore
+del(name)
 
 
 def check_var_name(name:str) -> tuple[bool,str] | tuple[Literal[False],None]:
@@ -573,16 +574,22 @@ class s(Type):
 	def _f_i(self) -> 'any_f':
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
-			f__f(int(self.value))
+			o = 0
+			for it in self.value[::-1]:
+				o <<= 8
+				o += ord(it)
+			f__f(self.convert(o,i))
 			return f()
 
 		return f__f
 
 	@builtin_function
-	def _f_n(self) -> 'any_f':
+	def _f_q(self) -> 'any_f':
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
-			f__f(float(self.value))
+			o = q()
+			o.value = [ord(it) for it in self.value]
+			f__f(o)
 			return f()
 
 		return f__f
@@ -608,6 +615,26 @@ class i(Type):
 
 		return f__f
 
+	@builtin_function
+	def _f_s(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			f__f(self.convert(str(self.value),s))
+			return f()
+
+		return f__f
+
+	@builtin_function
+	def _f_q(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			o = q()
+			o.value = [self.value]
+			f__f(o)
+			return f()
+
+		return f__f
+
 
 class n(Type):
 	value: float = 0.0
@@ -625,6 +652,24 @@ class n(Type):
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
 			f__f(-self.value)
+			return f()
+
+		return f__f
+
+	@builtin_function
+	def _f_s(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			f__f(self.convert(str(self.value),s))
+			return f()
+
+		return f__f
+
+	@builtin_function
+	def _f_n(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			f__f(self.convert(int(self.value),n))
 			return f()
 
 		return f__f
@@ -724,6 +769,15 @@ class q(Type):
 	@builtin_method
 	def m__a(self,i__v: 'i') -> None:
 		self.value.append(i__v.value)
+
+	@builtin_function
+	def _f_i(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			f__f(self.value.pop(0))
+			return f()
+
+		return f__f
 
 
 class t(Type):
@@ -883,3 +937,10 @@ any_m: TypeAlias = m | BuiltinMethod
 TypeLike = Type | MethodOrFunction
 ConvType = int | float | str | bool | IO[str] | list[int]\
 	| tuple[tuple | str, tuple | str] | Callable
+
+__all__ = ['BoundMethodOrFunction', 'BuiltinFunction', 'BuiltinMethod',
+'BuiltinMethodOrFunction', 'ConvType', 'MethodOrFunction', 'NamespaceContext',
+'ReturnType', 'RuntimeMethodOrFunction', 'Type', 'TypeLike',
+'TypeReference', 'WarpedMethodOrFunction', '_FutureType', 'any_f', 'any_m',
+'b', 'builtin_function', 'builtin_method', 'builtin_namespace',
+'check_compatability', 'check_var_name', 'f', 'i', 'm', 'n', 'q', 's', 't']
