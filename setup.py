@@ -26,7 +26,7 @@ setup(
 	author_email="minekpo1@gmail.com",
 	license="fafol",
 	classifiers=[
-		"License :: Fuck around and Find out License",
+		"License :: Free To Use But Restricted",
 		"Programming Language :: Python :: 3",
 		"Programming Language :: Python :: 3.10",
 	],
