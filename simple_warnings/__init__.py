@@ -20,9 +20,9 @@ class WarningCatcher(object):
 		if self.__prev is not None:
 			self.__locals[self.__hidden_var_name] = self.__prev
 
-	def warn(self):
+	def warn(self, warning: Warning) -> None:
 		if self.log:
-			self.warnings.append(traceback.format_stack())
+			self.warnings.append(warning)
 		if self.__prev is not None:
 			self.__prev.warn()
 
@@ -62,12 +62,14 @@ def print_warning(warning: Warning) -> None:
 showwarning = print_warning
 
 
-def warn(warning: Warning) -> None:
+def warn(warning: Warning | str) -> None:
 	"""
 		Rise a warning.
 	"""
 	wc = WarningCatcher.get_current_warning_catcher()
+	if isinstance(warning, str):
+		warning = Warning(warning)
 	if wc is not None:
-		wc.warn()
+		wc.warn(warning)
 	else:
 		print_warning(warning)
