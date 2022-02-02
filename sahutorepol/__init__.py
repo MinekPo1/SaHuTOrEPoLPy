@@ -1,4 +1,4 @@
-from sahutorepol.sahutorepol import main, parse, parse_expr, Code,\
+from sahutorepol.main import main, parse, parse_expr, Code,\
 	SaHuTOrEPoLError, SaHuTOrEPoLWarning, show_error_or_warning
 from sahutorepol.Types import NamespaceContext, Type, builtin_function,\
 	builtin_method

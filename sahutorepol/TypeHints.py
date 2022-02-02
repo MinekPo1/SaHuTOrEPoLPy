@@ -7,17 +7,18 @@ class AST:
 
 	class Root(Element):
 		type: Literal['root']
+		file: str
 		children: list["AST.Elements"]
 		type_defs:dict[str,"AST.TypeDef"]
 
 	class If(Element):
 		type: Literal['if']
-		expresion: "AST.Expresion"
+		expression: "AST.Expression"
 		children: list["AST.Elements"]
 
 	class While(Element):
 		type: Literal['while']
-		expresion: "AST.Expresion"
+		expression: "AST.Expression"
 		children: list["AST.Elements"]
 
 	class TypeDef(Element):
@@ -40,12 +41,12 @@ class AST:
 	class VarSet(Element):
 		type: Literal['var_set']
 		name: str
-		value: "AST.Expresion"
+		value: "AST.Expression"
 
 	class MethodCall(Element):
 		type: Literal['method_call']
 		name: str
-		args: list["AST.Expresion"]
+		args: list["AST.Expression"]
 
 	class Expresions:
 		class Base(TypedDict):
@@ -53,7 +54,7 @@ class AST:
 
 		class Multi(Base):
 			type: Literal['multi_expression']
-			expressions: list["AST.Expresion"]
+			expressions: list["AST.Expression"]
 
 		class Var(Base):
 			type: Literal['var_expression']
@@ -85,12 +86,17 @@ class AST:
 		class FunctionCall(Base):
 			type: Literal['function_call']
 			name: str
-			args: list["AST.Expresion"]
+			args: list["AST.Expression"]
+
+		class ConstructorCall(Base):
+			type: Literal['constructor_call']
+			name: str
+			args: list["AST.Expression"]
 
 		LiteralValue: TypeAlias = LiteralValues.any
 
-	Expresion: TypeAlias = Expresions.Multi | Expresions.Var \
-		| Expresions.Literal_ | Expresions.FunctionCall
+	Expression: TypeAlias = Expresions.Multi | Expresions.Var \
+		| Expresions.Literal_ | Expresions.FunctionCall | Expresions.ConstructorCall
 
 	Elements: TypeAlias = Root | While | If | VarDef | VarSet\
 		| MethodCall

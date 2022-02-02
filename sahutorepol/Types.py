@@ -1,15 +1,22 @@
-
 from abc import ABC, abstractmethod
 import re
 from typing import IO, TYPE_CHECKING, Any, Callable, ClassVar, Generic,\
 	Literal, Optional, Protocol, Type as LType, TypeVar, overload
 from typing import TypeAlias
+from sahutorepol.Errors import TracebackHint
+
 import simple_warnings as warnings
 import sys
+from sahutorepol.TypeHints import AST
+if TYPE_CHECKING:
+	from main import Code
 
 
 T = TypeVar('T','Type','i')
-TRet = TypeVar('TRet', 'LType[Type]', 'None')
+TLike= TypeVar('TLike','TypeLike','i')
+TFoM = TypeVar('TFoM','Type','any_f','any_m')
+TRet = TypeVar('TRet', 'Type', 'None')
+TorLType = TypeVar('TorLType','Type','LType[Type]')
 
 
 def check_compatability():
@@ -26,12 +33,14 @@ class NamespaceContext(object):
 	is_builtin = False
 	vars: "Vars"
 	types: "Types"
+	depth: int
 
 	class Vars(object):
 		def __init__(self,namespace: "NamespaceContext") -> None:
 			self.namespace = namespace
 			self._vars: dict[str,TypeLike] = {}
-			if namespace.previous is None or namespace.previous.is_builtin:
+			if namespace.previous is None or namespace.previous.is_builtin\
+					or namespace.isolate:
 				self._g_vars = {}
 			else:
 				self._g_vars = namespace.previous.vars._g_vars
@@ -59,11 +68,53 @@ class NamespaceContext(object):
 			raise KeyError(f"variable {key} not in namespace")
 
 		def __setitem__(self,key:str,value:"TypeLike") -> None:
-			if key[0] == "_":
+			if "-" in key:
+				keys = key.split("-")
+				obj = self[keys[0]]
+				for k in keys[1:-1]:
+					obj = getattr(obj,k)
+				obj.__setattr__(keys[-1],value)
+				return
+
+			if key in self._g_vars:
+				self._g_vars[key] = value
+				return
+
+			if key in self._vars:
 				self._vars[key] = value
 				return
 
-			self._g_vars[key] = value
+			p = self.namespace
+			while p.previous is not None:
+				p = p.previous
+				if key in p.vars._vars:
+					p.vars._vars[key] = value
+					return
+
+			raise KeyError(f"variable {key} not in namespace")
+
+		@overload
+		def define(self, var:str, value: TLike,force_local:bool = False)\
+				-> TLike:
+			...
+
+		@overload
+		def define(self, var: TFoM,*,force_local:bool = False) -> TFoM:
+			...
+
+		def define(self, var: 'str | any_f | any_m', value=None, force_local=False):
+			if not(isinstance(var,str)):
+				value = var
+				if isinstance(var,BuiltinMethodOrFunction):
+					var = var.__name__
+				else:
+					var = var.inner.ast['name']  # type:ignore
+					var = str(var)
+			if force_local or var.startswith("_"):
+				self._vars[var] = value
+			else:
+				self._g_vars[var] = value
+			return value
 
 		def __contains__(self,key:str) -> bool:
 			if key in self._g_vars:
@@ -110,11 +161,15 @@ class NamespaceContext(object):
 				return key in builtin_namespace.types._types
 			return False
 
-	def __init__(self) -> None:
+	def __init__(self,isolate: bool = False, prevous=None) -> None:
+		self.isolate = isolate
 		self.local_ref = sys._getframe(1).f_locals
+		self.previous = prevous
 
 	def __enter__(self) -> 'NamespaceContext':
-		self.previous = self.get_current_context() if not(self.is_builtin) else None
+		if self.previous is None:
+			self.previous = self.get_current_context() if not(self.is_builtin) else None
+		self.depth = self.previous.depth + 1 if self.previous is not None else 0
 		self.vars = self.Vars(self)
 		self.types = self.Types(self)
 		self.local_ref['namespace_context'] = self
@@ -123,13 +178,53 @@ class NamespaceContext(object):
 	def __exit__(self, exc_type, exc_val, exc_tb) -> None:
 		self.local_ref['namespace_context'] = self.previous
 
+	def make_child(self) -> 'NamespaceContext':
+		namespace_context = self
+		namespace_context = namespace_context
+		o = NamespaceContext(prevous=namespace_context)
+		o.local_ref = sys._getframe(1).f_locals
+		return o
+
+	@overload
+	def define(
+			self, var_or_type: str, value: TorLType, force_local=False
+		) -> TorLType:
+		...
+
+	@overload
+	def define(
+			self, var_or_type: 'any_f | any_m',*,force_local:bool = False
+		) -> None:
+		...
+
+	@overload
+	def define(self, var_or_type: "LType[Type]") -> None:
+		...
+
+	def define(
+			self, var_or_type: "str | any_f | any_m | LType[Type]", value=None,
+			force_local=False
+		):
+		if not(isinstance(var_or_type,str)):
+			value = var_or_type
+			if isinstance(var_or_type, (BuiltinMethodOrFunction, type)):
+				var_or_type = var_or_type.__name__
+			else:
+				var_or_type = var_or_type.inner.ast['name']
+				var_or_type = str(var_or_type)
+		if isinstance(value, type):
+			self.types[var_or_type] = value
+		else:
+			self.vars.define(var_or_type,value,force_local)
+		return value
+
 	@classmethod
 	def get_current_context(cls) -> "NamespaceContext":
-		try:
-			if namespace_context is not None:  # type:ignore
-				return namespace_context   # type:ignore
-		except NameError:
-			pass
+		# try:
+		# 	if namespace_context is not None:  # type:ignore
+		# 		return namespace_context   # type:ignore
+		# except NameError:
+		# 	pass
 
 		i = 0
 		while True:
@@ -141,6 +236,9 @@ class NamespaceContext(object):
 			if c is not None:
 				return c
 			i += 1
+
+	def __repr__(self):
+		return f"<NamespaceContext of depth {self.depth}>"
 
 
 class _FutureType(type):
@@ -201,7 +299,7 @@ WarpedMethodOrFunction = TypeVar(
 	"BuiltinMethodOrFunction",
 	"MethodOrFunction"
 )
-ReturnType = TypeVar("ReturnType", "LType[Type]", "None")
+ReturnType = TypeVar("ReturnType", "Type", "None")
 
 
 class MethodOrFunction(ABC, Generic[ReturnType]):
@@ -305,12 +403,9 @@ class BuiltinMethodOrFunction(MethodOrFunction):
 	def __init_subclass__(cls,type_n: str) -> None:
 		cls.type_n = type_n
 
-	def __get__(self,obj,cls) ->\
-			"BoundMethodOrFunction | BuiltinMethodOrFunction":
-		if obj is None:
-			return self
-
-		return BoundMethodOrFunction(obj,self)
+	def __get__(self,obj,cls)\
+			-> "BoundMethodOrFunction | BuiltinMethodOrFunction":
+		return self if obj is None else BoundMethodOrFunction(obj,self)
 
 	@abstractmethod
 	def __call__(self,*args: "TypeLike") -> "TypeLike | None":
@@ -348,8 +443,10 @@ class BuiltinFunction(BuiltinMethodOrFunction,type_n="f"):
 			t = r.ref if isinstance(r,TypeReference) else r
 			if t == "self":
 				continue
+			if isinstance(t,_FutureType):
+				raise ValueError(f"Type {t!r} is not yet defined")
 			if not(isinstance(a,t)):
-				nargs[i] = t(a)
+				nargs[i] = Type.convert(a,t)
 
 		ret = self.wrapped(*nargs)
 
@@ -381,7 +478,10 @@ class BuiltinMethod(BuiltinMethodOrFunction,type_n="m"):
 
 	def __call__(self,*args) -> None:
 		if len(args) > len(self.arg_types):
-			raise ValueError("Incorrect number of arguments")
+			raise ValueError(
+				f"Incorrect number of arguments got {len(args)}, "
+				f"expected {len(self.arg_types)} for {self.__qualname__}"
+			)
 		nargs = list(args)
 		for i,(a,r) in enumerate(zip(args,self.arg_types)):
 			t = r.ref if isinstance(r,TypeReference) else r
@@ -420,11 +520,16 @@ class Type(ABC):
 			if t.alias_type is not None and isinstance(v,t.alias_type):
 				return v  # type:ignore
 			try:
-				return v.cast(t)
+				return v.cast(t)  # type:ignore
 			except TypeError as ex:
 				if hasattr(t,'cast_to'):
 					return getattr(t,'cast_to')(v)
 				raise ex
+		elif isinstance(v,TypeLike):
+			if t.alias_type is not None and isinstance(v,t.alias_type):
+				return v  # type:ignore
+			else:
+				raise TypeError(f"Cannot convert {v!r} to {t!r}")
 		else:
 			match v:
 				case int(v):
@@ -452,19 +557,19 @@ class Type(ABC):
 	def __init__(self,*args) -> None:
 		args = [i for i in args if i is not None]
 		if not args:
-			self.gmeof("__me")()
+			self.attr("__me")()
 		elif len(args) == 1:
-			r = self.gmeof("__ms").arg_types[1]
+			r = self.attr("__ms").arg_types[1]
 			t = r.ref if isinstance(r,TypeReference) else r
 			if isinstance(t,_FutureType):
 				raise ValueError(f"type {t.__name__} is not yet defined")
 			if t == "self":
 				raise RuntimeError
 			arg = self.convert(args[0],t)
-			self.gmeof("__ms")(arg)
+			self.attr("__ms")(arg)
 		elif len(args) == 2:
-			r1 = self.gmeof("__mm").arg_types[1]
-			r2 = self.gmeof("__mm").arg_types[2]
+			r1 = self.attr("__mm").arg_types[1]
+			r2 = self.attr("__mm").arg_types[2]
 			t1 = r1.ref if isinstance(r1,TypeReference) else r1
 			t2 = r2.ref if isinstance(r2,TypeReference) else r2
 
@@ -477,7 +582,7 @@ class Type(ABC):
 				raise RuntimeError
 			arg1 = self.convert(args[0],t1)
 			arg2 = self.convert(args[1],t2)
-			self.gmeof("__mm")(arg1,arg2)
+			self.attr("__mm")(arg1,arg2)
 		else:
 			raise TypeError("Cannot construct a type with more than two arguments.")
 
@@ -495,35 +600,26 @@ class Type(ABC):
 
 	def cast(self,t:LType[T]) -> T:
 		# sourcery skip: assign-if-exp, remove-redundant-if
-		if hasattr(self,'_f_{t.__name__}'):
-			r: T
-			if TYPE_CHECKING:
-				if issubclass(t,Type):
-					r = t()
-				else:
-					r = t(lambda: None)
-					# the line above would cause an error, if it was actually ran
-					# but it's not a problem, because it's only to tell the type checker
-					# what happened
-			else:
-				if TYPE_CHECKING:
-					m__c = None
-					# why is this here?
-					# good question
+		if hasattr(self,f'_f_{t.__name__}'):
+			r: T | None
 
-				r = None  # tell python the scope of the variable
-				exec(
-					"@builtin_method\n"
-					f"def m__c({t}__v):\n"
-					"	nonlocal r\n"
-					f"	r = {t}__v\n"
-				)
-				getattr(self,'_f_{t.__name__}')(m__c)
+			r = None  # tell python the scope of the variable
 
-			return r
+			@builtin_function
+			def f__c(i__v) -> 'any_f':
+				nonlocal r
+				r = i__v
+				return f()
+
+			f__c.arg_types[0]._ref = t  # type:ignore
+
+			f_ = self.attr(f'_f_{t.__name__}')
+			f_()(f__c)
+
+			return r  # type:ignore
 		raise TypeError(f"Cannot cast {self!r} to {t!r}")
 
-	def gmeof(self, __name: str) -> Any:
+	def attr(self, __name: str) -> Any:
 		if __name.startswith("__"):
 			name = f"_{self.__class__.__name__}{__name}"
 			if hasattr(self,name):
@@ -535,6 +631,9 @@ class Type(ABC):
 			raise AttributeError(f"{self!r} has no attribute {__name!r}")
 
 		return getattr(self,__name)
+
+	def __bool__(self) -> bool:
+		return b(self).value
 
 
 class s(Type):
@@ -594,6 +693,9 @@ class s(Type):
 
 		return f__f
 
+	def __repr__(self) -> str:
+		return f"<{self.__class__.__qualname__}({self.value!r})>"
+
 
 class i(Type):
 	value: int = 0
@@ -635,6 +737,11 @@ class i(Type):
 
 		return f__f
 
+	def __repr__(self) -> str:
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		return f"<{module}{self.__class__.__qualname__}({self.value!r})>"
+
 
 class n(Type):
 	value: float = 0.0
@@ -674,6 +781,11 @@ class n(Type):
 
 		return f__f
 
+	def __repr__(self) -> str:
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		return f"<{module}{self.__class__.__qualname__}({self.value!r})>"
+
 
 class b(Type):
 	value: bool = False
@@ -705,15 +817,20 @@ class b(Type):
 		r.value = bool(value)
 		return r
 
+	def __repr__(self) -> str:
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		return f"<{module}{self.__class__.__qualname__}({['yes','no'][self.value]})>"
+
 
 class S(Type):
-	out: IO[str]
-	in_: IO[str]
+	out: IO[str] | None
+	in_: IO[str] | None
 
 	@builtin_method
 	def __me(self) -> None:
-		self.out = sys.stdout
-		self.in_ = sys.stdin
+		self.out = None
+		self.in_ = None
 
 	@builtin_method
 	def __ms(self,s__v: 's') -> None:
@@ -727,7 +844,10 @@ class S(Type):
 
 	@builtin_function
 	def f__r(self) -> 'any_f':
-		v = self.in_.readline()
+		if self.in_:
+			v = self.in_.readline()
+		else:
+			v = input()
 
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
@@ -738,7 +858,16 @@ class S(Type):
 
 	@builtin_method
 	def m__w(self,s__v: 's') -> None:
-		self.out.write(s__v.value)
+		if self.out:
+			self.out.write(s__v.value)
+		else:
+			print(s__v.value,end="")
+
+	def __repr__(self) -> str:
+		val = self.out.name if self.out is not None else "console"
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		return f"<{module}{self.__class__.__qualname__}({val})>"
 
 
 class q(Type):
@@ -779,6 +908,11 @@ class q(Type):
 
 		return f__f
 
+	def __repr__(self) -> str:
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		return f"<{module}{self.__class__.__qualname__}>"
+
 
 class t(Type):
 	s__v: 's' = s()
@@ -796,15 +930,11 @@ class t(Type):
 
 	@property
 	def t__l(self) -> 't':
-		if self._child_l is None:
-			return t()
-		return self._child_l
+		return t() if self._child_l is None else self._child_l
 
 	@property
 	def t__r(self) -> 't':
-		if self._child_r is None:
-			return t()
-		return self._child_r
+		return t() if self._child_r is None else self._child_r
 
 	@builtin_method
 	def m__c(self,t__v: 't') -> None:
@@ -824,9 +954,15 @@ class t(Type):
 
 		return f__f
 
+	def __repr__(self) -> str:
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		return f"<{module}{self.__class__.__qualname__}({self.s__v.value!r})>"
+
 
 class RuntimeMethodOrFunction(MethodOrFunction):
 	namespace_hook: Optional[Callable[[NamespaceContext],None]] = None
+	inner: 'Code[AST.FuncOrMethodDef]'
 
 	@overload
 	def __init__(self) -> None:
@@ -841,32 +977,55 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 		if inner is not None and args is None:
 			raise ValueError("args must be provided if inner is not None.")
 		if args:
-			context = NamespaceContext.get_current_context()
+			self.context = NamespaceContext.get_current_context()
 			self.arg_types = []
 			self.args:list[str] = []
 			for i in args:
 				v,t = check_var_name(i)
 				if t is None:
 					raise ValueError(f"Invalid argument name: {i=}")
-				self.arg_types.append(TypeReference(context.types[t]))
+				self.arg_types.append(TypeReference(self.context.types[t]))
 				self.args.append(i)
 
 	def __call__(
 			self, *args, namespace_hook: Callable[[NamespaceContext],None] = None
 		) -> None:
-		with NamespaceContext() as context:
+		# check if the function is being called with the correct number of arguments
+		if len(args) != len(self.args):
+			raise ValueError(
+				f"{self!r} expected {len(self.args)} arguments, got {len(args)} "
+				f"(see line {self.inner.ast['pos'][0]})",
+			)
+		with self.context.make_child() as context:
 			for r,n,v in zip(self.arg_types,self.args,args):
 				t = r.ref if isinstance(r,TypeReference) else r
 				if t == "self":
 					raise RuntimeError
 				if isinstance(t,_FutureType):
 					raise ValueError(f"type {t=} is not yet defined.")
-				context.vars._vars[n] = t.convert(v,t)
+				try:
+					context.vars._vars[n] = t.convert(v,t)
+				except TypeError as e:
+					raise TypeError(
+						f"{e} for argument {n}"
+						f"(from line {self.inner.ast['pos'][0]})"
+					) from e
 
 			if namespace_hook is not None:
 				namespace_hook(context)
 
-			self.inner.run()
+			with TracebackHint((0,0),name=self.inner.ast['name']):
+				self.inner._run(self.inner.ast)
+
+	def __repr__(self) -> str:
+		module = self.__class__.__module__ + "."\
+			if self.__class__.__module__ != "__main__" else ""
+		signature = (
+			f"{', '.join(self.inner.ast['args'])}"  # type:ignore
+			if self.inner else ""
+		)
+		name = self.inner.ast['name'] if self.inner else "empty"  # type:ignore
+		return f"<{module}{self.__class__.__qualname__} {name}({signature})>"
 
 
 class f(RuntimeMethodOrFunction, Type):
@@ -880,18 +1039,20 @@ class f(RuntimeMethodOrFunction, Type):
 	def __call__(self, *args) -> 'f':
 		if self.inner is None:
 			if len(args) != 0:
-				raise TypeError(f"Function takes no arguments, {len(args)+1} given.")
+				raise TypeError(
+					f"Function ({self!r}) takes no arguments,"
+					f"{len(args)+1} given."
+				)
 			return self
 
 		r = None
 
 		def namespace_hook(context: 'NamespaceContext') -> None:
+			@context.define
 			@builtin_method
 			def __mr(self: f) -> None:
 				nonlocal r
 				r = self
-
-			context.vars["__mr"] = __mr
 
 		super().__call__(*args,namespace_hook=namespace_hook)
 
