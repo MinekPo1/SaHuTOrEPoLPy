@@ -82,11 +82,13 @@ def format_path(path: str) -> str:
 
 def show_error_or_warning(
 		error: SaHuTOrEPoLError | SaHuTOrEPoLKeyBoardInterrupt | SaHuTOrEPoLWarning,
-		file_dict: dict[str, list[str] | str] = {}
+		file_dict: dict[str, list[str] | str] = None
 	):
 	"""
 	Show the error message and the code snippet where it occurred.
 	"""
+	if file_dict is None:
+		file_dict = {}
 	print()
 
 	i = None

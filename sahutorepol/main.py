@@ -1,11 +1,23 @@
 from typing import Generator, Generic, Literal, TypeVar, overload
 import re
+
+import click
 from simple_warnings import catch_warnings, warn, print_warning
+import pathlib
+from os import environ
 
 from sahutorepol.Types import NamespaceContext
 from sahutorepol import Types, TypeHints
 from sahutorepol.Errors import SaHuTOrEPoLError, SaHuTOrEPoLKeyBoardInterrupt,\
 	SaHuTOrEPoLWarning, show_error_or_warning, TracebackPoint, TracebackHint
+
+
+# get library path from environment variable
+
+if "SaHPath" in environ:
+	libpath = [pathlib.Path(i) for i in environ["SaHPath"].split(":")]
+else:
+	libpath = []
 
 
 class CodePointer(object):
@@ -250,7 +262,7 @@ class Code(Generic[TContext]):
 
 def split_expr(expr:str, sep: str)\
 		-> Generator[str,None,None]:
-	if sep == "":
+	if sep:
 		raise ValueError("Empty separator")
 	sep_len = len(sep)
 	cur = ""
@@ -405,8 +417,52 @@ happyness_warning_messages = {
 }
 
 
+cached_parsed_files: dict[str,TypeHints.AST.Root] = {}
+member_cache: dict[str,dict[str,TypeHints.AST.Members]] = {}
+
+
+def get_file_name(lib_name: str) -> str:
+	raise NotImplementedError(
+		"Library localisation has not yet been implemented."
+	)
+	# TODO: implement library localisation
+
+
+def extract_member(name:str, lib_name: str) -> TypeHints.AST.Members:
+	file_name = get_file_name(lib_name)
+	if file_name not in member_cache:
+		member_cache[file_name] = {}
+		if file_name not in cached_parsed_files:
+			tree = parse(open(file_name).read(),file_name)
+		elif cached_parsed_files[file_name] is None:
+			raise SaHuTOrEPoLError(
+				f"File {file_name} has been attempted to be parsed multiple times, "
+				"most likely due to a circular import",
+				(0,0)
+			)
+		else:
+			tree = cached_parsed_files[file_name]
+		for k,i in tree['type_defs'].items():
+			member_cache[file_name][k] = i
+		for i in tree['children']:
+			if i['type'] == 'func_def':
+				member_cache[file_name][i['name']] = i
+	return member_cache[file_name][name]
+
+
 def parse(code:str, file_name: str)\
 	-> TypeHints.AST.Root:  # sourcery no-metrics
+
+	file_name = str(pathlib.Path(file_name).resolve())
+
+	if file_name in cached_parsed_files:
+		if cached_parsed_files[file_name] is None:
+			raise SaHuTOrEPoLError(
+				f"File {file_name} has been attempted to be parsed multiple times, "
+				"most likely due to a circular import",
+				(0,0)
+			)
+		return cached_parsed_files[file_name]
 
 	with TracebackHint((1,1),file_name):
 		ptr = CodePointer(code)
@@ -430,7 +486,7 @@ def parse(code:str, file_name: str)\
 		bracket_stack: list[tuple[int,int]] = []
 		while True:
 			c = next(ptr, None)
-			# region strip and manage indent
+			# region: strip and manage indent
 			if p_do:
 				if c != "\n":
 					happines -= 1
@@ -494,7 +550,7 @@ def parse(code:str, file_name: str)\
 				symbol += c
 			# endregion
 
-			# region make sure we don't split a string literal or contents of a bracket
+			# region: make sure we don't split a string literal or contents of a bracket
 			if symbol.count("\"") % 2 == 1:
 				if c == "\n":
 					raise SaHuTOrEPoLError(
@@ -525,7 +581,7 @@ def parse(code:str, file_name: str)\
 				continue
 			# endregion
 
-			# region manage do and comments
+			# region: manage do and comments
 			if len(symbol) == 2 and symbol[0] == " ":
 				symbol = symbol[1]
 
@@ -654,6 +710,18 @@ def parse(code:str, file_name: str)\
 					context.append(tree['type_defs'][name])
 					symbol = ""
 
+				if m:=re.fullmatch(
+					rf"\$({RegexBank.variable_name}) ?\$([a-zA-Z0-9\-.]+)",symbol
+				):
+					name = m.group(1)
+					lname= m.group(2)
+					v = extract_member(name,lname)
+					if v['type'] == "type_def":
+						tree['type_defs'][name] = v
+					else:
+						context[-1]['children'].append(v)
+
+
 			if m:=re.fullmatch(rf"\$({RegexBank.variable}) ",symbol):
 				name = m.group(1)
 				v,t = check_var_name(name)
@@ -736,6 +804,8 @@ def parse(code:str, file_name: str)\
 				ptr.pos
 			)
 
+		cached_parsed_files[file_name] = tree
+
 		return tree
 
 
@@ -793,7 +863,7 @@ tuple(): """
 }
 
 
-def main(*args):
+def old_main(*args):
 	import sys
 	import json
 	import yaml
@@ -941,6 +1011,26 @@ def main(*args):
 					sys.exit(1)
 				if t is None:
 					raise RuntimeError
+
+
+@click.group()
+@click.option(
+	"--raise","-r","do_raise",is_flag=True,help="Raise errors (Show python stack trace instead of the SaHuTOrEPoL)."
+)
+@click.option(
+	"--silent","-s",is_flag=True,help="Do not show warnings."
+)
+@click.option(
+	"--strict","-S",is_flag=True,help="Do not continue if errors are raised."
+)
+@click.pass_context
+def cli(ctx,do_raise:bool,silent:bool,strict:bool):
+	ctx.ensure_object(dict)
+	ctx.obj["raise"]  = do_raise
+	ctx.obj["silent"] = silent
+	ctx.obj["strict"] = strict
+
+# @cli.command("parse")
 
 
 if __name__ == "__main__":

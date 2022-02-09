@@ -5,38 +5,40 @@ class AST:
 	class Element(TypedDict):
 		pos: tuple[int, int]
 
-	class Root(Element):
+	class Context(Element):
+		children: list["AST.Elements"]
+
+	class Root(Context):
 		type: Literal['root']
 		file: str
-		children: list["AST.Elements"]
 		type_defs:dict[str,"AST.TypeDef"]
 
-	class If(Element):
+	class If(Context):
 		type: Literal['if']
 		expression: "AST.Expression"
-		children: list["AST.Elements"]
 
-	class While(Element):
+	class While(Context):
 		type: Literal['while']
 		expression: "AST.Expression"
-		children: list["AST.Elements"]
 
-	class TypeDef(Element):
+	class TypeDef(Context):
 		type: Literal['type_def']
 		name: str
-		children: list["AST.Elements"]
 
 	class EmptyVarDef(Element):
 		type: Literal['var_def']
 		name: str
 
-	class FuncOrMethodDef(Element):
+	class FuncOrMethodDef(Context):
 		type: Literal['func_def']
 		name: str
 		args: list[str]
-		children: list["AST.Elements"]
 
 	VarDef: TypeAlias = EmptyVarDef | FuncOrMethodDef
+
+	class FileCapture(Context):
+		type: Literal['file_capture']
+		name: str
 
 	class VarSet(Element):
 		type: Literal['var_set']
@@ -101,3 +103,5 @@ class AST:
 	Elements: TypeAlias = Root | While | If | VarDef | VarSet\
 		| MethodCall
 	Contexts: TypeAlias = Root | While | If | FuncOrMethodDef | TypeDef
+
+	Members: TypeAlias = TypeDef | FuncOrMethodDef
