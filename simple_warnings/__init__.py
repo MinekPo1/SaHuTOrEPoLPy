@@ -4,12 +4,13 @@ import sys
 
 class WarningCatcher(object):
 	__hidden_var_name = '__hidden warning catcher__'
+	warnings: list[Warning] = []
 
-	def __init__(self,record=True) -> None:
+	def __init__(self,record=True,frames_up=1) -> None:
 		self.log = record
 		if record:
 			self.warnings = []
-		self.__locals = sys._getframe(1).f_locals
+		self.__locals = sys._getframe(frames_up).f_locals
 
 	def __enter__(self) -> 'WarningCatcher':
 		self.__prev = self.__locals.get(self.__hidden_var_name, None)
@@ -52,7 +53,7 @@ def catch_warnings(record=True) -> WarningCatcher:
 	"""
 		Return a WarningCatcher object.
 	"""
-	return WarningCatcher(record)
+	return WarningCatcher(record,2)
 
 
 def print_warning(warning: Warning) -> None:

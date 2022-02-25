@@ -102,7 +102,10 @@ class NamespaceContext(object):
 		def define(self, var: TFoM,*,force_local:bool = False) -> TFoM:
 			...
 
-		def define(self, var: 'str | any_f | any_m', value=None, force_local=False):
+		def define(
+				self, var: 'str | any_f | any_m', value: "TypeLike" | TLike | None = None,
+				force_local=False
+			):
 			if not(isinstance(var,str)):
 				value = var
 				if isinstance(var,BuiltinMethodOrFunction):
@@ -110,6 +113,8 @@ class NamespaceContext(object):
 				else:
 					var = var.inner.ast['name']  # type:ignore
 					var = str(var)
+			if value is None:
+				raise ValueError("value cannot be None if var is not a string")
 			if force_local or var.startswith("_"):
 				self._vars[var] = value
 			else:
@@ -164,15 +169,17 @@ class NamespaceContext(object):
 	def __init__(self,isolate: bool = False, prevous=None) -> None:
 		self.isolate = isolate
 		self.local_ref = sys._getframe(1).f_locals
-		self.previous = prevous
+		if prevous is None:
+			self.previous = self.get_current_context() if not(self.is_builtin) else None
+		self.has_been_built = False
 
 	def __enter__(self) -> 'NamespaceContext':
-		if self.previous is None:
-			self.previous = self.get_current_context() if not(self.is_builtin) else None
-		self.depth = self.previous.depth + 1 if self.previous is not None else 0
-		self.vars = self.Vars(self)
-		self.types = self.Types(self)
-		self.local_ref['namespace_context'] = self
+		if not(self.has_been_built):
+			self.depth = self.previous.depth + 1 if self.previous is not None else 0
+			self.vars = self.Vars(self)
+			self.types = self.Types(self)
+			self.local_ref['namespace_context'] = self
+			self.has_been_built = True
 		return self
 
 	def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -210,6 +217,7 @@ class NamespaceContext(object):
 			if isinstance(var_or_type, (BuiltinMethodOrFunction, type)):
 				var_or_type = var_or_type.__name__
 			else:
+				var_or_type.inner
 				var_or_type = var_or_type.inner.ast['name']
 				var_or_type = str(var_or_type)
 		if isinstance(value, type):
@@ -231,14 +239,20 @@ class NamespaceContext(object):
 			try:
 				c = sys._getframe(i).f_locals.get('namespace_context',None)
 			except ValueError:
-				return builtin_namespace
+				try:
+					return builtin_namespace
+				except NameError:
+					return None  # type:ignore
 
 			if c is not None:
 				return c
 			i += 1
 
 	def __repr__(self):
-		return f"<NamespaceContext of depth {self.depth}>"
+		return (
+			f"<NamespaceContext of depth {self.depth}>"
+			if self.has_been_built else "<Unbuilt NamespaceContext>"
+		)
 
 
 class _FutureType(type):
@@ -824,13 +838,15 @@ class b(Type):
 
 
 class S(Type):
-	out: IO[str] | None
-	in_: IO[str] | None
+	stdout = sys.stdout
+	stdin  = sys.stdin
+	out: IO[str]
+	in_: IO[str]
 
 	@builtin_method
 	def __me(self) -> None:
-		self.out = None
-		self.in_ = None
+		self.out = self.stdout
+		self.in_ = self.stdin
 
 	@builtin_method
 	def __ms(self,s__v: 's') -> None:
@@ -844,10 +860,7 @@ class S(Type):
 
 	@builtin_function
 	def f__r(self) -> 'any_f':
-		if self.in_:
-			v = self.in_.readline()
-		else:
-			v = input()
+		v = self.in_.readline()
 
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
@@ -858,15 +871,14 @@ class S(Type):
 
 	@builtin_method
 	def m__w(self,s__v: 's') -> None:
-		if self.out:
-			self.out.write(s__v.value)
-		else:
-			print(s__v.value,end="")
+		self.out.write(s__v.value)
 
 	def __repr__(self) -> str:
 		val = self.out.name if self.out is not None else "console"
-		module = self.__class__.__module__ + "."\
+		module = (
+			f'{self.__class__.__module__}.'
 			if self.__class__.__module__ != "__main__" else ""
+		)
 		return f"<{module}{self.__class__.__qualname__}({val})>"
 
 
@@ -972,7 +984,7 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 	def __init__(self,inner, args: list[str]) -> None:
 		...
 
-	def __init__(self, inner=None, args:list[str] = None) -> None:
+	def __init__(self, inner=None, args:list[str]|None = None) -> None:
 		self.inner = inner
 		if inner is not None and args is None:
 			raise ValueError("args must be provided if inner is not None.")
@@ -1014,17 +1026,22 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 			if namespace_hook is not None:
 				namespace_hook(context)
 
+			self.inner.ast
+
 			with TracebackHint((0,0),name=self.inner.ast['name']):
 				self.inner._run(self.inner.ast)
 
 	def __repr__(self) -> str:
-		module = self.__class__.__module__ + "."\
+		module = (
+			f'{self.__class__.__module__}.'
 			if self.__class__.__module__ != "__main__" else ""
+		)
 		signature = (
 			f"{', '.join(self.inner.ast['args'])}"  # type:ignore
 			if self.inner else ""
 		)
 		name = self.inner.ast['name'] if self.inner else "empty"  # type:ignore
+		return f"<{module}{self.__class__.__qualname__} {name}({signature})>"
 		return f"<{module}{self.__class__.__qualname__} {name}({signature})>"
 
 

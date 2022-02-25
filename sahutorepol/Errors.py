@@ -80,20 +80,18 @@ def format_path(path: str) -> str:
 	return f"./{p_path.as_posix()}"
 
 
-def show_error_or_warning(
+def format_error_or_warning(
 		error: SaHuTOrEPoLError | SaHuTOrEPoLKeyBoardInterrupt | SaHuTOrEPoLWarning,
-		file_dict: dict[str, list[str] | str] = None
-	):
-	"""
-	Show the error message and the code snippet where it occurred.
-	"""
+		file_dict: dict[str, list[str] | str] | None = None
+	) -> str:
 	if file_dict is None:
 		file_dict = {}
-	print()
 
 	i = None
 
-	# print traceback
+	out = ""
+
+	# add traceback
 	for j,i in enumerate(error.traceback):
 		if isinstance(i, TracebackHint) and j != len(error.traceback)-1:
 			continue
@@ -101,7 +99,7 @@ def show_error_or_warning(
 		if i.file is not None:
 			mes += f" in {format_path(i.file)}:"
 		mes += f"{i.pos[0]}"
-		print(mes)
+		out += (mes) + "\n"
 		if i.file is None:
 			continue
 		if i.file not in file_dict:
@@ -109,25 +107,38 @@ def show_error_or_warning(
 				with open(i.file) as f:
 					file_dict[i.file] = f.readlines()
 			except Exception:
-				file_dict[i.file] = "Unable to read file"
+				file_dict[i.file] = f"Unable to read file ({i.file!r})"
 
 		if isinstance(file_dict[i.file], str):
-			print(file_dict[i.file])
+			out += str(file_dict[i.file]) + "\n"
 		else:
 			line = file_dict[i.file][i.pos[0] - 1]
-			print(line,end="")
+			out += line + "\n"
 			tabs = line[:i.pos[1] - 1].count("\t")
-			print("\t"*tabs+" " * (i.pos[1] - 1-tabs) + "^")
+			out += "\t"*tabs+" " * (i.pos[1] - 1-tabs) + "^" + "\n"
 
-	print(f"{error.str_type}: {error.message}")
+	out += f"{error.str_type}: {error.message}\n"
+	return out
+
+
+def show_error_or_warning(
+		error: SaHuTOrEPoLError | SaHuTOrEPoLKeyBoardInterrupt | SaHuTOrEPoLWarning,
+		file_dict: dict[str, list[str] | str] | None = None
+	):
+	"""
+	Show the error message and the code snippet where it occurred.
+	"""
+	print()
+	print(format_error_or_warning(error,file_dict))
 
 
 class TracebackPoint(object):
 	"""
 		A point in the traceback. Use as a context manager.
 	"""
-	def __init__(self, pos: tuple[int, int], file: str = None, name:str = None)\
-			-> None:
+	def __init__(
+		self, pos: tuple[int, int], file: str | None = None, name:str | None = None
+		) -> None:
 		self.pos = pos
 		self.file = file
 		self.name = name

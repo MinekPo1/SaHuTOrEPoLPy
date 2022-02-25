@@ -1,16 +1,16 @@
 from typing import Generator, Generic, Literal, TypeVar, overload
 import re
 
-import click
-from simple_warnings import catch_warnings, warn, print_warning
+from simple_warnings import warn
 import pathlib
 from os import environ
 
 from sahutorepol.Types import NamespaceContext
 from sahutorepol import Types, TypeHints
 from sahutorepol.Errors import SaHuTOrEPoLError, SaHuTOrEPoLKeyBoardInterrupt,\
-	SaHuTOrEPoLWarning, show_error_or_warning, TracebackPoint, TracebackHint
+	SaHuTOrEPoLWarning, TracebackPoint, TracebackHint
 
+import sys
 
 # get library path from environment variable
 
@@ -18,6 +18,59 @@ if "SaHPath" in environ:
 	libpath = [pathlib.Path(i) for i in environ["SaHPath"].split(":")]
 else:
 	libpath = []
+
+# TODO[id=STD]: implement standard library
+
+
+class LibraryPath:
+	__hidden_var_name = "__library_path"
+	previous: "LibraryPath | None"
+
+	def __init__(self,*args:pathlib.Path,override=False,) -> None:
+		self._paths = list(args)
+		self.override = override
+		self.previous = None
+
+	@property
+	def paths(self) -> list[pathlib.Path]:
+		if self.previous is None or self.override:
+			return self._paths
+		return self.previous.paths.copy() + self._paths  # ew
+
+	def __enter__(self):
+		# fetch previous library path
+		r = None
+		i = 1
+		while r is None:
+			try:
+				r = sys._getframe(i).f_locals.get(self.__hidden_var_name, None)
+			except ValueError:
+				break
+			i += 1
+		# if `r is None` we are the first library path
+		# use `libpath` as previous library path in that case
+		self.previous = LibraryPath(*libpath) if r is None else r
+
+		sys._getframe(1).f_locals[self.__hidden_var_name] = self
+		return self
+
+	def __exit__(self, *args):
+		if self.previous is not None:
+			sys._getframe(1).f_locals[self.__hidden_var_name] = self.previous
+		else:
+			del sys._getframe(1).f_locals[self.__hidden_var_name]
+
+	@classmethod
+	def get_current_library_path(cls) -> 'list[pathlib.Path] | None':
+		r = None
+		i = 1
+		while r is None:
+			try:
+				r = sys._getframe(i).f_locals.get(cls.__hidden_var_name, None)
+			except ValueError:
+				break
+			i += 1
+		return r.paths if r is not None else None
 
 
 class CodePointer(object):
@@ -87,12 +140,13 @@ class Code(Generic[TContext]):
 	def __init__(self,ast: TContext) -> None:
 		self.ast = ast
 
-	def resolve_expr(self,expr: TypeHints.AST.Expression) -> Types.TypeLike:
+	@classmethod
+	def resolve_expr(cls,expr: TypeHints.AST.Expression) -> Types.TypeLike:
 		context: NamespaceContext
 		context = NamespaceContext.get_current_context()
 		match expr:
 			case {"type": "multi_expression", "expressions": list(e)}:
-				elements = [self.resolve_expr(i) for i in e]
+				elements = [cls.resolve_expr(i) for i in e]
 				try:
 					obj = type(elements[0])(elements.pop(0),elements.pop())
 					while elements:
@@ -114,7 +168,7 @@ class Code(Generic[TContext]):
 			case {"type": "literal_expression", "value": value}:
 				return context.types[value['type']](value['value'])  # type:ignore
 			case {"type":"function_call", "name": name, "args": list(args)}:
-				args = [self.resolve_expr(i) for i in args]
+				args = [cls.resolve_expr(i) for i in args]
 				f: Types.BoundMethodOrFunction[Types.f,Types.Type] \
 					| Types.f | Types.BuiltinFunction
 				try:
@@ -148,7 +202,7 @@ class Code(Generic[TContext]):
 						expr['pos']
 					) from ex
 			case {"type":"constructor_call", "name": name, "args": list(args)}:
-				args = [self.resolve_expr(i) for i in args]
+				args = [cls.resolve_expr(i) for i in args]
 				try:
 					c = context.types[name]
 				except KeyError as ex:
@@ -166,13 +220,14 @@ class Code(Generic[TContext]):
 			case _:
 				raise SaHuTOrEPoLError(f"Unknown expression type {expr}", expr['pos'])
 
-	def _run(self,ast: TypeHints.AST.Contexts) -> None:
+	@classmethod
+	def _run(cls,ast: TypeHints.AST.Contexts) -> None:
 		context = NamespaceContext.get_current_context()
 		td: dict[str,TypeHints.AST.TypeDef] | None
 		if (td := (ast.get('type_defs',None))) is not None:
 			for k,v in td.items():
 				with NamespaceContext(True) as tns:
-					self._run(v)
+					cls._run(v)
 				context.types[k] = type(
 					f"RuntimeType[{k}]",(Types.Type,),tns.vars._vars
 				)
@@ -215,7 +270,7 @@ class Code(Generic[TContext]):
 								(Types.f,Types.BuiltinFunction,Types.m,Types.BuiltinMethod)
 							) and not(callable(f)):
 								raise SaHuTOrEPoLError(f"{f!r} is not callable",i['pos'])
-							args = [self.resolve_expr(i) for i in args]
+							args = [cls.resolve_expr(i) for i in args]
 							try:
 								with TracebackPoint(i['pos']):
 									f(*args)
@@ -224,13 +279,13 @@ class Code(Generic[TContext]):
 							except Exception as e:
 								raise SaHuTOrEPoLError(f"{e}",i['pos']) from e
 						case {"type": "while", "expression": condition}:
-							while self.resolve_expr(condition):
-								self._run(i)
+							while cls.resolve_expr(condition):
+								cls._run(i)
 						case {"type": "if", "expression": condition}:
-							if self.resolve_expr(condition):
-								self._run(i)
+							if cls.resolve_expr(condition):
+								cls._run(i)
 						case {"type": "var_set", "name": name, "value": value}:
-							v = self.resolve_expr(value)
+							v = cls.resolve_expr(value)
 							_,t = check_var_name(name)
 							if not(isinstance(v,context.types[t])):
 								v = Types.Type.convert(v,context.types[t])
@@ -252,7 +307,9 @@ class Code(Generic[TContext]):
 
 	def run(self) -> None:
 		file = self.ast.get("file",None)
-		with Types.NamespaceContext(), TracebackHint(self.ast['pos'],file):
+		if not(isinstance(file,str)):
+			raise ValueError("No file specified, corrupted AST?")
+		with Types.NamespaceContext() as ctx, TracebackHint(self.ast['pos'],file):
 			self._run(self.ast)
 
 	@property
@@ -262,7 +319,7 @@ class Code(Generic[TContext]):
 
 def split_expr(expr:str, sep: str)\
 		-> Generator[str,None,None]:
-	if sep:
+	if not(sep):
 		raise ValueError("Empty separator")
 	sep_len = len(sep)
 	cur = ""
@@ -450,10 +507,11 @@ def extract_member(name:str, lib_name: str) -> TypeHints.AST.Members:
 	return member_cache[file_name][name]
 
 
-def parse(code:str, file_name: str)\
+def parse(code:str, file_name: str, do_resolve: bool = True)\
 	-> TypeHints.AST.Root:  # sourcery no-metrics
 
-	file_name = str(pathlib.Path(file_name).resolve())
+	if do_resolve:
+		file_name = str(pathlib.Path(file_name).resolve())
 
 	if file_name in cached_parsed_files:
 		if cached_parsed_files[file_name] is None:
@@ -721,7 +779,6 @@ def parse(code:str, file_name: str)\
 					else:
 						context[-1]['children'].append(v)
 
-
 			if m:=re.fullmatch(rf"\$({RegexBank.variable}) ",symbol):
 				name = m.group(1)
 				v,t = check_var_name(name)
@@ -807,233 +864,3 @@ def parse(code:str, file_name: str)\
 		cached_parsed_files[file_name] = tree
 
 		return tree
-
-
-help_s = {
-tuple(): """
-	Usage:
-	sahutorepol parse [<options>] <file> [<output>]
-	sahutorepol check [<options>] <file>
-	sahutorepol run [<options>] <file>
-	sahutorepol help [<command>]
-""",
-("help",): """
-	Usage:
-	sahutorepol parse [<options>] <file> [<output>]
-	sahutorepol run [<options>] <file>
-	sahutorepol help [<command>]
-
-	Common options:
-	-s  silent, don't show warnings
-	-S  strict, if any warning is found, do not continue
-	-r  raise, if any error or warning is found, raise it instead of showing it
-""",
-("help", "parse"): """
-	Usage:
-	sahutorepol parse [<options>] <file> [<output>]
-
-	Options:
-	-s  silent, don't show warnings
-	-S  strict, if any warning is found, do not continue
-	-r  raise, if any error or warning is found, raise it instead of showing it
-	-y  yaml, output the parsed tree in yaml format, else use json
-""",
-("help", "check"): """
-	Usage:
-	sahutorepol parse [<options>] <file> [<output>]
-
-	Options:
-	-s  silent, don't show warnings
-	-S  strict, if any warning is found, do not continue
-	-r  raise, if any error or warning is found, raise it instead of showing it
-	-p  parsable, output the error and/or warnings in parsable format
-	-y  yaml, output the parsable output in yaml format, else use json
-""",
-("help", "run"): """
-	Usage:
-	sahutorepol run [<options>] <file>
-
-	Options:
-	-s  silent, don't show warnings
-	-S  strict, if any warning is found, do not continue
-	-r  raise, if any error or warning is found, raise it instead of showing it
-
-"""
-
-}
-
-
-def old_main(*args):
-	import sys
-	import json
-	import yaml
-
-	match args:
-		case ["parse", options, file, output]:
-			method = "parse"
-		case ["parse", options, file]:
-			method = "parse"
-			output = None
-		case ["parse", file]:
-			method = "parse"
-			options = ""
-			output = None
-
-		case ["run", options, file]:
-			method = "run"
-			output = None
-		case ["run", file]:
-			method = "run"
-			options = ""
-			output = None
-
-		case ["check", options, file]:
-			method = "check"
-			output = None
-		case ["check", file]:
-			method = "check"
-			options = ""
-			output = None
-
-		case _:
-			if tuple(args[:2]) in help_s:
-				print(help_s[tuple(args[:2])])
-			else:
-				print(help_s[tuple()])
-			sys.exit(0)
-
-	match method:
-		case "parse":
-			with open(file) as f:
-				err = False
-				with catch_warnings(record=True) as w:
-					try:
-						t = parse(f.read(),file)
-					except SaHuTOrEPoLError as ex:
-						if "r" in options:
-							raise ex
-						t = None
-						show_error_or_warning(ex)
-						err = True
-				if "s" not in options:
-					for warning in w:
-						if isinstance(warning,SaHuTOrEPoLWarning) and "s" not in options:
-							show_error_or_warning(warning)
-						else:
-							print_warning(warning)
-					if "S" in options and w:
-						err = True
-				if err:
-					sys.exit(1)
-				if t is None:
-					raise RuntimeError
-				if "y" in options:
-					dump = yaml.dump(t,default_flow_style=False)
-				else:
-					dump = json.dumps(t,indent=2)
-				if output is None:
-					print(dump)
-				elif "n" not in options:
-					with open(output,"w") as f:
-						f.write(dump)
-
-		case "check":
-			with open(file) as f:
-				data = []
-				err = False
-				with catch_warnings(record=True) as w:
-					try:
-						parse(f.read(),file)
-					except SaHuTOrEPoLError as ex:
-						if "r" in options:
-							raise ex
-						if "p" in options:
-							data.append(
-								{
-									"type": "error",
-									"message": ex.message,
-									"pos": ex.pos
-								}
-							)
-							err = True
-						else:
-							show_error_or_warning(ex)
-							err = True
-				if "s" not in options:
-					for warning in w:
-						if isinstance(warning,SaHuTOrEPoLWarning) and "s" not in options:
-							if "p" in options:
-								data.append(
-									{
-										"type": "warning",
-										"message": warning.message,
-										"pos": warning.pos,
-									}
-								)
-							show_error_or_warning(warning)
-						else:
-							print_warning(warning)
-					if "S" in options and w:
-						err = True
-				if "p" in options:
-					if "y" in options:
-						dump = yaml.dump(data,default_flow_style=False)
-					else:
-						dump = json.dumps(data,indent=2)
-
-					print(dump)
-				if err:
-					sys.exit(1)
-
-		case "run":
-			with open(file) as f:
-				err = False
-				with catch_warnings(record=True) as w:
-					try:
-						t = parse(f.read(),file)
-						print("parsed")
-						Code(t).run()
-					except (SaHuTOrEPoLError,SaHuTOrEPoLKeyBoardInterrupt) as ex:
-						if "r" in options:
-							raise ex
-						show_error_or_warning(ex)
-						t = None
-						err = True
-				if "s" not in options:
-					for warning in w:
-						if isinstance(warning,SaHuTOrEPoLWarning) and "s" not in options:
-							show_error_or_warning(warning)
-						else:
-							print_warning(warning)
-					if "S" in options and w:
-						err = True
-				if err:
-					sys.exit(1)
-				if t is None:
-					raise RuntimeError
-
-
-@click.group()
-@click.option(
-	"--raise","-r","do_raise",is_flag=True,help="Raise errors (Show python stack trace instead of the SaHuTOrEPoL)."
-)
-@click.option(
-	"--silent","-s",is_flag=True,help="Do not show warnings."
-)
-@click.option(
-	"--strict","-S",is_flag=True,help="Do not continue if errors are raised."
-)
-@click.pass_context
-def cli(ctx,do_raise:bool,silent:bool,strict:bool):
-	ctx.ensure_object(dict)
-	ctx.obj["raise"]  = do_raise
-	ctx.obj["silent"] = silent
-	ctx.obj["strict"] = strict
-
-# @cli.command("parse")
-
-
-if __name__ == "__main__":
-	import sys
-	# print(*sys.argv[1:])
-	main(*sys.argv[1:])
