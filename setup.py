@@ -17,7 +17,7 @@ bundle_simple_warnings = (HERE / "simple_warnings").exists()
 # This call to setup() does all the work
 setup(
 	name="SaHuTOrEPoLPy",
-	version="0.0.5",
+	version="0.0.5.3",
 	description="SaHuTOrEPoLPy is a simple interpreter for SaHuTOrEPoL",
 	long_description=README,
 	long_description_content_type="text/markdown",
@@ -37,7 +37,7 @@ setup(
 		+ ([] if bundle_simple_warnings else ["simple_warnings"]),
 	entry_points={
 		"console_scripts": [
-			"sahutorepol=sahutorepol.__main__:main",
+			"sahutorepol=sahutorepol.__main__:cli",
 		]
 	},
 )
