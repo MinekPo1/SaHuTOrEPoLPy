@@ -98,7 +98,7 @@ class RegexBank:
 	variable = rf'{variable_name}(-{variable_name})*'
 	type_name = r'[a-zA-Z]'
 	i_literal = r'-?([1-9]\d*|0)'
-	f_literal = r'[1-9]\d*\.(\d*[1-9]|0)'
+	n_literal = r'[1-9]\d*,(\d*[1-9]|0)'
 	b_literal = r'(yes|no)'
 	s_literal = r'(?P<s>[\"\'])[^\n\r]*(?P=s)'
 	do = r'do'
@@ -384,12 +384,12 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 			},
 			'pos': pos
 		}
-	if re.fullmatch(RegexBank.f_literal,expr):
+	if re.fullmatch(RegexBank.n_literal,expr):
 		return {
 			'type': 'literal_expression',
 			'value': {
 				'type': 'f',
-				'value':float(expr),
+				'value':float(expr.replace(",",".")),
 			},
 			'pos': pos
 		}
