@@ -147,6 +147,11 @@ class Code(Generic[TContext]):
 		match expr:
 			case {"type": "multi_expression", "expressions": list(e)}:
 				elements = [cls.resolve_expr(i) for i in e]
+				if isinstance(elements[0], Types.MethodOrFunction):
+					raise SaHuTOrEPoLError(
+						"Cannot create a function or method inside of a multi expression.",
+						expr['pos']
+					)
 				try:
 					obj = type(elements[0])(elements.pop(0),elements.pop())
 					while elements:
@@ -223,14 +228,36 @@ class Code(Generic[TContext]):
 	@classmethod
 	def _run(cls,ast: TypeHints.AST.Contexts) -> None:
 		context = NamespaceContext.get_current_context()
-		td: dict[str,TypeHints.AST.TypeDef] | None
+		import_vars: dict[str,dict[str,Types.TypeLike | type[Types.Type]]] = {}
+		if (imports := (ast.get('imports',None))) is not None:
+			for k,v in imports.items():
+				with (
+						NamespaceContext(True) as import_np,
+						TracebackPoint(v['pos']), TracebackHint((0,0),k)
+					):
+					cls._run(v)
+					import_vars[k] = import_np.vars._g_vars
+					import_vars[k].update(import_np.types._types)
+
+		td: dict[str,TypeHints.AST.TypeDefOrInclude] | None
 		if (td := (ast.get('type_defs',None))) is not None:
 			for k,v in td.items():
-				with NamespaceContext(True) as tns:
-					cls._run(v)
-				context.types[k] = type(
-					f"RuntimeType[{k}]",(Types.Type,),tns.vars._vars
-				)
+				if isinstance(v,TypeHints.AST.TypeDef):
+					with NamespaceContext(True) as type_ns:
+						cls._run(v)
+					context.types[k] = type(
+						f"RuntimeType[{k}]",(Types.Type,),type_ns.vars._vars
+					)
+				else:
+					pot_type = import_vars[v['source']][k]
+					if isinstance(pot_type,type):
+						context.types[k] = pot_type
+					else:
+						raise SaHuTOrEPoLError(
+							"Attempted to import a variable as a type",
+							v['pos']
+						)
+
 		for i in ast['children']:
 			with TracebackHint(i['pos']):
 				try:
@@ -296,6 +323,16 @@ class Code(Generic[TContext]):
 									f"Undefined variable {name}",
 									i['pos']
 								) from ex
+						case {"type": "var_inc", "name": name, "source": source}:
+							val = import_vars[source][name]
+							# this is not really needed since it
+							if isinstance(val,type):
+								raise SaHuTOrEPoLError(
+									"Attempted to import a type as a variable",
+									i['pos']
+								)
+							context.define(name,val)  # type:ignore
+
 						case _:
 							raise SaHuTOrEPoLError(f"Unknown expression type {i}",i['pos'])
 				except SaHuTOrEPoLKeyBoardInterrupt as ex:
@@ -309,7 +346,7 @@ class Code(Generic[TContext]):
 		file = self.ast.get("file",None)
 		if not(isinstance(file,str)):
 			raise ValueError("No file specified, corrupted AST?")
-		with Types.NamespaceContext() as ctx, TracebackHint(self.ast['pos'],file):
+		with Types.NamespaceContext(), TracebackHint(self.ast['pos'],file):
 			self._run(self.ast)
 
 	@property
@@ -482,10 +519,10 @@ def get_file_name(lib_name: str) -> str:
 	raise NotImplementedError(
 		"Library localisation has not yet been implemented."
 	)
-	# TODO: implement library localisation
+	# TODO[id=lib_loc]: implement library localisation
 
 
-def extract_member(name:str, lib_name: str) -> TypeHints.AST.Members:
+def check_for_member(name:str, lib_name: str) -> Literal["Type", "Var"] | None:
 	file_name = get_file_name(lib_name)
 	if file_name not in member_cache:
 		member_cache[file_name] = {}
@@ -504,7 +541,10 @@ def extract_member(name:str, lib_name: str) -> TypeHints.AST.Members:
 		for i in tree['children']:
 			if i['type'] == 'func_def':
 				member_cache[file_name][i['name']] = i
-	return member_cache[file_name][name]
+	member = member_cache[file_name].get(name,None)
+	if member is None:
+		return None
+	return "Type" if member['type'] in ['type_def','type_include'] else "Var"
 
 
 def parse(code:str, file_name: str, do_resolve: bool = True)\
@@ -529,6 +569,7 @@ def parse(code:str, file_name: str, do_resolve: bool = True)\
 			"pos": (0,0),
 			"type": "root",
 			"children": [],
+			"imports": {},
 			"type_defs": {},
 			"file": file_name
 		}
@@ -640,6 +681,10 @@ def parse(code:str, file_name: str, do_resolve: bool = True)\
 			# endregion
 
 			# region: manage do and comments
+			# check for shellbangs
+			if ptr.line == 1 and symbol == "#!":
+				while next(ptr) != "\n":
+					pass
 			if len(symbol) == 2 and symbol[0] == " ":
 				symbol = symbol[1]
 
@@ -759,25 +804,63 @@ def parse(code:str, file_name: str, do_resolve: bool = True)\
 			if context[-1]['type'] == "root":
 				if m:=re.fullmatch(rf"({RegexBank.type_name}) ?\$",symbol):
 					name = m.group(1)
-					tree['type_defs'][name] = {
+					type_def: TypeHints.AST.TypeDef = {
 						'type': 'type_def',
 						'name': name,
 						'pos': ptr.pos,
 						'children': [],
 					}
-					context.append(tree['type_defs'][name])
+					tree['type_defs'][name] = type_def
+					context.append(type_def)
 					symbol = ""
 
 				if m:=re.fullmatch(
-					rf"\$({RegexBank.variable_name}) ?\$([a-zA-Z0-9\-.]+)",symbol
+					rf"\$({RegexBank.type_name}) ?\$([a-zA-Z0-9\-\.]+)",symbol
 				):
 					name = m.group(1)
 					lname= m.group(2)
-					v = extract_member(name,lname)
-					if v['type'] == "type_def":
-						tree['type_defs'][name] = v
-					else:
-						context[-1]['children'].append(v)
+					if check_for_member(name,lname) is None:
+						raise SaHuTOrEPoLError(
+							f"Member {name!r} not found in {lname!r}",
+							ptr.pos
+						)
+					elif check_for_member(name,lname) != "Type":
+						raise SaHuTOrEPoLError(
+							f"Member {name!r} is not a type",
+							ptr.pos
+						)
+					tree["type_defs"][name] = {
+						'type': 'type_include',
+						'name': name,
+						'source': lname,
+						'pos': ptr.pos
+					}
+					d_exp = True
+					symbol = ""
+
+				if m:=re.fullmatch(
+					rf"\$({RegexBank.variable_name}) ?\$([a-zA-Z0-9\-\.]+)",symbol
+				):
+					name = m.group(1)
+					lname= m.group(2)
+					if check_for_member(name,lname) is None:
+						raise SaHuTOrEPoLError(
+							f"Member {name!r} not found in {lname!r}",
+							ptr.pos
+						)
+					elif check_for_member(name,lname) != "Var":
+						raise SaHuTOrEPoLError(
+							f"Member {name!r} is not a variable",
+							ptr.pos
+						)
+					context[-1]['children'].append({
+						'type': 'var_inc',
+						'name': name,
+						'source': lname,
+						'pos': ptr.pos
+					})
+					d_exp = True
+					symbol = ""
 
 			if m:=re.fullmatch(rf"\$({RegexBank.variable}) ",symbol):
 				name = m.group(1)

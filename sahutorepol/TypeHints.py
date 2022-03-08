@@ -11,7 +11,8 @@ class AST:
 	class Root(Context):
 		type: Literal['root']
 		file: str
-		type_defs:dict[str,"AST.TypeDef"]
+		type_defs:dict[str,"AST.TypeDefOrInclude"]
+		imports: dict[str, "AST.Root"]
 
 	class If(Context):
 		type: Literal['if']
@@ -25,6 +26,13 @@ class AST:
 		type: Literal['type_def']
 		name: str
 
+	class TypeInclude(Element):
+		type: Literal['type_include']
+		name: str
+		source: str
+
+	TypeDefOrInclude = TypeDef | TypeInclude
+
 	class EmptyVarDef(Element):
 		type: Literal['var_def']
 		name: str
@@ -34,7 +42,12 @@ class AST:
 		name: str
 		args: list[str]
 
-	VarDef: TypeAlias = EmptyVarDef | FuncOrMethodDef
+	class VarInclude(Element):
+		type: Literal['var_inc']
+		name: str
+		source: str
+
+	VarDef: TypeAlias = EmptyVarDef | FuncOrMethodDef | VarInclude
 
 	class FileCapture(Context):
 		type: Literal['file_capture']
@@ -104,4 +117,4 @@ class AST:
 		| MethodCall
 	Contexts: TypeAlias = Root | While | If | FuncOrMethodDef | TypeDef
 
-	Members: TypeAlias = TypeDef | FuncOrMethodDef
+	Members: TypeAlias = TypeDefOrInclude | FuncOrMethodDef
