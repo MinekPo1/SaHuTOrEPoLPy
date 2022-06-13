@@ -29,6 +29,12 @@ class IOStealer:
 			raise ValueError("No IOWrapper found")
 		return iow.write(s)
 
+	@staticmethod
+	def flush():
+		if (iow:=IOWrapper.get()) is None:
+			raise ValueError("No IOWrapper found")
+		return iow.flush()
+
 
 T = TypeVar('T', str, bytes)
 

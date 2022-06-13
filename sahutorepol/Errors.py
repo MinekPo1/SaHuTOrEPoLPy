@@ -118,7 +118,7 @@ def format_error_or_warning(
 		if isinstance(file_dict[i.file], str):
 			out += str(file_dict[i.file]) + "\n"
 		else:
-			line = file_dict[i.file][i.pos[0] - 1]
+			line = file_dict[i.file][i.pos[0] - 1][:-1]
 			out += line + "\n"
 			tabs = line[:i.pos[1] - 1].count("\t")
 			out += "\t"*tabs+" " * (i.pos[1] - 1-tabs) + "^" + "\n"

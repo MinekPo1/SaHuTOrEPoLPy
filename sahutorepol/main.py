@@ -1,4 +1,4 @@
-from typing import Generator, Generic, Literal, TypeVar, overload
+from typing import Generator, Generic, Iterable, Literal, TypeVar, overload
 import re
 
 from simple_warnings import warn
@@ -227,7 +227,7 @@ class Code(Generic[TContext]):
 					raise SaHuTOrEPoLError(f"Unknown expression type {expr}", expr['pos'])
 
 	@classmethod
-	def _run(cls,ast: TypeHints.AST.Contexts) -> None:
+	def _run(cls,ast: TypeHints.AST.Contexts) -> Generator:
 		context = NamespaceContext.get_current_context()
 		import_vars: dict[str,dict[str,Types.TypeLike | type[Types.Type]]] = {}
 		if (imports := (ast.get('imports',None))) is not None:
@@ -301,17 +301,20 @@ class Code(Generic[TContext]):
 							args = [cls.resolve_expr(i) for i in args]
 							try:
 								with TracebackPoint(i['pos']):
-									f(*args)
+									if isinstance(f,Types.RuntimeMethodOrFunction):
+										yield from f.iter(args)
+									else:
+										f(*args)
 							except SaHuTOrEPoLError as e:
 								raise e
 							except Exception as e:
 								raise SaHuTOrEPoLError(f"{e}",i['pos']) from e
 						case {"type": "while", "expression": condition}:
 							while cls.resolve_expr(condition):
-								cls._run(i)
+								yield from cls._run(i)
 						case {"type": "if", "expression": condition}:
 							if cls.resolve_expr(condition):
-								cls._run(i)
+								yield from cls._run(i)
 						case {"type": "var_set", "name": name, "value": value}:
 							v = cls.resolve_expr(value)
 							_,t = check_var_name(name)
@@ -342,13 +345,21 @@ class Code(Generic[TContext]):
 					raise SaHuTOrEPoLKeyBoardInterrupt(
 						"Program interrupted by user",i['pos']
 						) from ex
+			yield None
 
 	def run(self) -> None:
 		file = self.ast.get("file",None)
 		if not(isinstance(file,str)):
 			raise ValueError("No file specified, corrupted AST?")
 		with Types.NamespaceContext(), TracebackHint(self.ast['pos'],file):
-			self._run(self.ast)
+			for _ in self._run(self.ast):
+				pass
+
+	def __iter__(self) -> Generator:
+		# manually enter the namespace context and traceback hint
+		Types.NamespaceContext().__enter__()
+		TracebackHint(self.ast['pos'],self.ast['file']).__enter__()
+		return self._run(self.ast)
 
 	@property
 	def pos(self) -> tuple[int,int]:

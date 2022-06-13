@@ -905,6 +905,7 @@ class S(Type):
 	@builtin_method
 	def m__w(self,s__v: 's') -> None:
 		self.out.write(s__v.value)
+		self.out.flush()
 
 	def __repr__(self) -> str:
 		val = self.out.name if self.out is not None else "console"
@@ -1006,7 +1007,6 @@ class t(Type):
 
 
 class RuntimeMethodOrFunction(MethodOrFunction):
-	namespace_hook: Optional[Callable[[NamespaceContext],None]] = None
 	inner: 'Code[AST.FuncOrMethodDef]'
 
 	@overload
@@ -1017,7 +1017,7 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 	def __init__(self,inner, args: list[str]) -> None:
 		...
 
-	def __init__(self, inner=None, args:list[str]|None = None) -> None:
+	def __init__(self, inner=None, args:list[str] | None = None) -> None:
 		self.inner = inner
 		if inner is not None and args is None:
 			raise ValueError("args must be provided if inner is not None.")
@@ -1033,7 +1033,8 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 				self.args.append(i)
 
 	def __call__(
-			self, *args, namespace_hook: Callable[[NamespaceContext],None] = None
+			self, *args, namespace_hook: Callable[[NamespaceContext],None] | None = None,
+			do_iter: bool = False
 		) -> None:
 		# check if the function is being called with the correct number of arguments
 		if len(args) != len(self.args):
@@ -1059,10 +1060,40 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 			if namespace_hook is not None:
 				namespace_hook(context)
 
-			self.inner.ast
+			with TracebackHint((0,0),name=self.inner.ast['name']):
+				for _ in self.inner._run(self.inner.ast):
+					pass
+
+	def iter(
+			self, *args, namespace_hook: Callable[[NamespaceContext],None] | None = None,
+			do_iter: bool = False
+		) -> None:
+		# check if the function is being called with the correct number of arguments
+		if len(args) != len(self.args):
+			raise ValueError(
+				f"{self!r} expected {len(self.args)} arguments, got {len(args)} "
+				f"(see line {self.inner.ast['pos'][0]})",
+			)
+		with self.context.make_child() as context:
+			for r,n,v in zip(self.arg_types,self.args,args):
+				t = r.ref if isinstance(r,TypeReference) else r
+				if t == "self":
+					raise RuntimeError
+				if isinstance(t,_FutureType):
+					raise ValueError(f"type {t=} is not yet defined.")
+				try:
+					context.vars._vars[n] = t.convert(v,t)
+				except TypeError as e:
+					raise TypeError(
+						f"{e} for argument {n}"
+						f"(from line {self.inner.ast['pos'][0]})"
+					) from e
+
+			if namespace_hook is not None:
+				namespace_hook(context)
 
 			with TracebackHint((0,0),name=self.inner.ast['name']):
-				self.inner._run(self.inner.ast)
+				yield from self.inner._run(self.inner.ast)
 
 	def __repr__(self) -> str:
 		module = (
@@ -1075,14 +1106,13 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 		)
 		name = self.inner.ast['name'] if self.inner else "empty"  # type:ignore
 		return f"<{module}{self.__class__.__qualname__} {name}({signature})>"
-		return f"<{module}{self.__class__.__qualname__} {name}({signature})>"
 
 
 class f(RuntimeMethodOrFunction, Type):
 	alias_type = BuiltinFunction
 	return_type: 'LType[f]'
 
-	def __init__(self, inner=None, args:list[str] = None) -> None:
+	def __init__(self, inner=None, args:list[str] | None = None) -> None:
 		super().__init__(inner, args)  # type:ignore
 		self.return_type = f
 
@@ -1107,8 +1137,31 @@ class f(RuntimeMethodOrFunction, Type):
 		super().__call__(*args,namespace_hook=namespace_hook)
 
 		if r is None:
-			if self.return_type is None:
-				raise TypeError("Function has no return type.")
+			return self.return_type()
+		return r
+
+	def iter(self, *args) -> 'f':
+		if self.inner is None:
+			if len(args) != 0:
+				raise TypeError(
+					f"Function ({self!r}) takes no arguments,"
+					f"{len(args)+1} given."
+				)
+			return self
+
+		r = None
+
+		def namespace_hook(context: 'NamespaceContext') -> None:
+			@context.define
+			@builtin_method
+			def __mr(self: f) -> None:
+				nonlocal r
+				r = self
+
+		yield from super().iter(*args,namespace_hook=namespace_hook)
+
+
+		if r is None:
 			return self.return_type()
 		return r
 
