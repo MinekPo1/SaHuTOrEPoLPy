@@ -98,7 +98,7 @@ class RegexBank:
 	variable = rf'{variable_name}(-{variable_name})*'
 	type_name = r'[a-zA-Z]'
 	i_literal = r'-?([1-9]\d*|0)'
-	n_literal = r'[1-9]\d*,(\d*[1-9]|0)'
+	n_literal = r'-?([1-9]\d*|0),(\d*[1-9]|0)'
 	b_literal = r'(yes|no)'
 	s_literal = r'(?P<s>[\"\'])[^\n\r]*(?P=s)'
 	do = r'do'
@@ -144,86 +144,87 @@ class Code(Generic[TContext]):
 	def resolve_expr(cls,expr: TypeHints.AST.Expression) -> Types.TypeLike:
 		context: NamespaceContext
 		context = NamespaceContext.get_current_context()
-		match expr:
-			case {"type": "multi_expression", "expressions": list(e)}:
-				elements = [cls.resolve_expr(i) for i in e]
-				if isinstance(elements[0], Types.MethodOrFunction):
-					raise SaHuTOrEPoLError(
-						"Cannot create a function or method inside of a multi expression.",
-						expr['pos']
-					)
-				try:
-					obj = type(elements[0])(elements.pop(0),elements.pop())
-					while elements:
-						obj = type(obj)(obj,elements.pop())
-				except TypeError as ex:
-					raise SaHuTOrEPoLError(
-						ex.args[0],
-						expr['pos']
-					) from ex
-				return obj
-			case {"type": "var_expression", "name": name}:
-				try:
-					return context.vars[name]
-				except KeyError as ex:
-					raise SaHuTOrEPoLError(
-						f"Variable {name} is not defined",
-						expr['pos']
-					) from ex
-			case {"type": "literal_expression", "value": value}:
-				return context.types[value['type']](value['value'])  # type:ignore
-			case {"type":"function_call", "name": name, "args": list(args)}:
-				args = [cls.resolve_expr(i) for i in args]
-				f: Types.BoundMethodOrFunction[Types.f,Types.Type] \
-					| Types.f | Types.BuiltinFunction
-				try:
-					f = context.vars[name]  # type:ignore
-				except KeyError as ex:
-					raise SaHuTOrEPoLError(
-						f"Function {name} is not defined",
-						expr['pos']
-					) from ex
-				if not isinstance(
-						f,
-						(Types.f,Types.BuiltinFunction,Types.BoundMethodOrFunction)
-					):
-					raise SaHuTOrEPoLError(
-						f"{name} is not a function (is of type {type(f)})",
-						expr['pos']
-					)
-				if isinstance(f,Types.BoundMethodOrFunction):
-
-					if f.return_type is None:
+		with TracebackHint(expr['pos']):
+			match expr:
+				case {"type": "multi_expression", "expressions": list(e)}:
+					elements = [cls.resolve_expr(i) for i in e]
+					if isinstance(elements[0], Types.MethodOrFunction):
+						raise SaHuTOrEPoLError(
+							"Cannot create a function or method inside of a multi expression.",
+							expr['pos']
+						)
+					try:
+						obj = type(elements[0])(elements.pop(0),elements.pop())
+						while elements:
+							obj = type(obj)(obj,elements.pop())
+					except TypeError as ex:
+						raise SaHuTOrEPoLError(
+							ex.args[0],
+							expr['pos']
+						) from ex
+					return obj
+				case {"type": "var_expression", "name": name}:
+					try:
+						return context.vars[name]
+					except KeyError as ex:
+						raise SaHuTOrEPoLError(
+							f"Variable {name} is not defined",
+							expr['pos']
+						) from ex
+				case {"type": "literal_expression", "value": value}:
+					return context.types[value['type']](value['value'])  # type:ignore
+				case {"type":"function_call", "name": name, "args": list(args)}:
+					args = [cls.resolve_expr(i) for i in args]
+					f: Types.BoundMethodOrFunction[Types.f,Types.Type] \
+						| Types.f | Types.BuiltinFunction
+					try:
+						f = context.vars[name]  # type:ignore
+					except KeyError as ex:
+						raise SaHuTOrEPoLError(
+							f"Function {name} is not defined",
+							expr['pos']
+						) from ex
+					if not isinstance(
+							f,
+							(Types.f,Types.BuiltinFunction,Types.BoundMethodOrFunction)
+						):
 						raise SaHuTOrEPoLError(
 							f"{name} is not a function (is of type {type(f)})",
 							expr['pos']
 						)
-				try:
-					with TracebackPoint(expr['pos']):
-						return f(*args)
-				except ValueError as ex:
-					raise SaHuTOrEPoLError(
-						ex.args[0],
-						expr['pos']
-					) from ex
-			case {"type":"constructor_call", "name": name, "args": list(args)}:
-				args = [cls.resolve_expr(i) for i in args]
-				try:
-					c = context.types[name]
-				except KeyError as ex:
-					raise SaHuTOrEPoLError(
-						f"Type {name!r} is not defined",
-						expr['pos']
-					) from ex
-				if issubclass(c,Types.RuntimeMethodOrFunction) and args != []:
-					raise SaHuTOrEPoLError(
-						f"Type {name!r} cannot be instantiated with arguments",
-						expr['pos']
-					)
-				return c(*args)
+					if isinstance(f,Types.BoundMethodOrFunction):
 
-			case _:
-				raise SaHuTOrEPoLError(f"Unknown expression type {expr}", expr['pos'])
+						if f.return_type is None:
+							raise SaHuTOrEPoLError(
+								f"{name} is not a function (is of type {type(f)})",
+								expr['pos']
+							)
+					try:
+						with TracebackPoint(expr['pos']):
+							return f(*args)
+					except ValueError as ex:
+						raise SaHuTOrEPoLError(
+							ex.args[0],
+							expr['pos']
+						) from ex
+				case {"type":"constructor_call", "name": name, "args": list(args)}:
+					args = [cls.resolve_expr(i) for i in args]
+					try:
+						c = context.types[name]
+					except KeyError as ex:
+						raise SaHuTOrEPoLError(
+							f"Type {name!r} is not defined",
+							expr['pos']
+						) from ex
+					if issubclass(c,Types.RuntimeMethodOrFunction) and args != []:
+						raise SaHuTOrEPoLError(
+							f"Type {name!r} cannot be instantiated with arguments",
+							expr['pos']
+						)
+					return c(*args)
+
+				case _:
+					raise SaHuTOrEPoLError(f"Unknown expression type {expr}", expr['pos'])
 
 	@classmethod
 	def _run(cls,ast: TypeHints.AST.Contexts) -> None:
@@ -425,7 +426,7 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 		return {
 			'type': 'literal_expression',
 			'value': {
-				'type': 'f',
+				'type': 'n',
 				'value':float(expr.replace(",",".")),
 			},
 			'pos': pos
@@ -475,7 +476,7 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 			args = []
 		else:
 			try:
-				args = list(split_expr(m.group(3),","))
+				args = list(split_expr(m.group(3),"|"))
 			except ValueError as ex:
 				raise SaHuTOrEPoLError(ex.args[0],pos) from ex
 		if m.group(3):
@@ -789,7 +790,7 @@ def parse(code:str, file_name: str, do_resolve: bool = True)\
 							f"Invalid variable type {t!r}",
 							ptr.pos
 						)
-					args = list(split_expr(args,","))
+					args = list(split_expr(args,"|"))
 					context[-1]['children'].append(
 						{
 							'type': 'method_call',

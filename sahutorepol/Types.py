@@ -3,7 +3,7 @@ import re
 from typing import IO, TYPE_CHECKING, Any, Callable, ClassVar, Generic,\
 	Literal, Optional, Protocol, Type as LType, TypeVar, overload
 from typing import TypeAlias
-from sahutorepol.Errors import TracebackHint
+from sahutorepol.Errors import SaHuTOrEPoLError, TracebackHint
 
 import simple_warnings as warnings
 import sys
@@ -171,6 +171,7 @@ class NamespaceContext(object):
 		self.local_ref = sys._getframe(1).f_locals
 		if prevous is None:
 			self.previous = self.get_current_context() if not(self.is_builtin) else None
+		self.previous = prevous
 		self.has_been_built = False
 
 	def __enter__(self) -> 'NamespaceContext':
@@ -338,7 +339,9 @@ class BoundMethodOrFunction(
 	alias_type = None
 	return_type: "LType[ReturnType]"
 
-	def __init__(self,obj,wrapped:WarpedMethodOrFunction = None) -> None:
+	def __init__(
+			self,obj: "TypeLike",wrapped:WarpedMethodOrFunction | None = None
+		) -> None:
 		self.obj = obj
 		self.wrapped = wrapped
 		if wrapped is not None:
@@ -538,7 +541,7 @@ class Type(ABC):
 			except TypeError as ex:
 				if hasattr(t,'cast_to'):
 					return getattr(t,'cast_to')(v)
-				raise ex
+				raise SaHuTOrEPoLError(str(ex)) from ex
 		elif isinstance(v,TypeLike):
 			if t.alias_type is not None and isinstance(v,t.alias_type):
 				return v  # type:ignore
@@ -566,7 +569,10 @@ class Type(ABC):
 						raise TypeError(f"Cannot convert {v!r}")
 				case _:
 					raise TypeError(f"Cannot convert {v!r} to {t!r}")
-			return Type.convert(r,t)
+			try:
+				return Type.convert(r,t)
+			except TypeError as ex:
+				raise SaHuTOrEPoLError(f"Cannot convert {v!r} to {t!r}") from ex
 
 	def __init__(self,*args) -> None:
 		args = [i for i in args if i is not None]
@@ -751,6 +757,17 @@ class i(Type):
 
 		return f__f
 
+	@builtin_function
+	def _f_n(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			o = n()
+			o.value = float(self.value)
+			f__f(o)
+			return f()
+
+		return f__f
+
 	def __repr__(self) -> str:
 		module = self.__class__.__module__ + "."\
 			if self.__class__.__module__ != "__main__" else ""
@@ -761,12 +778,12 @@ class n(Type):
 	value: float = 0.0
 
 	@builtin_method
-	def __ms(self,i__v: 'i') -> None:
-		self.value = i__v.value
+	def __ms(self,n__v: 'n') -> None:
+		self.value = n__v.value
 
 	@builtin_method
-	def __mm(self,i__l: 'i',i__r: 'i') -> None:
-		self.value = i__l.value + i__r.value
+	def __mm(self,n__l: 'n',n__r: 'i') -> None:
+		self.value = n__l.value + n__r.value
 
 	@builtin_function
 	def f__i(self) -> 'any_f':
@@ -787,7 +804,7 @@ class n(Type):
 		return f__f
 
 	@builtin_function
-	def _f_n(self) -> 'any_f':
+	def _f_i(self) -> 'any_f':
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
 			f__f(self.convert(int(self.value),n))
@@ -796,9 +813,11 @@ class n(Type):
 		return f__f
 
 	def __repr__(self) -> str:
-		module = self.__class__.__module__ + "."\
+		module = (
+			f'{self.__class__.__module__}.'
 			if self.__class__.__module__ != "__main__" else ""
-		return f"<{module}{self.__class__.__qualname__}({self.value!r})>"
+		)
+		return f"<{module}{self.__class__.__qualname__}({str(self.value).replace('.',',')})>"
 
 
 class b(Type):
@@ -821,6 +840,18 @@ class b(Type):
 
 		return f__f
 
+	@builtin_function
+	def _f_s(self) -> 'any_f':
+		@builtin_function
+		def f__f(f__f: 'any_f') -> 'any_f':
+			if self.value:
+				f__f(s("yes"))
+			else:
+				f__f(s("no"))
+			return f()
+
+		return f__f
+
 	@classmethod
 	def cast_to(cls,value: "TypeLike | ConvType") -> 'b':
 		r = b()
@@ -832,9 +863,11 @@ class b(Type):
 		return r
 
 	def __repr__(self) -> str:
-		module = self.__class__.__module__ + "."\
+		module = (
+			f'{self.__class__.__module__}.'
 			if self.__class__.__module__ != "__main__" else ""
-		return f"<{module}{self.__class__.__qualname__}({['yes','no'][self.value]})>"
+		)
+		return f"<{module}{self.__class__.__qualname__}({['no','yes'][self.value]})>"
 
 
 class S(Type):
@@ -856,7 +889,7 @@ class S(Type):
 
 	@builtin_method
 	def __mm(self,s__l: 's',s__r: 's') -> None:
-		raise TypeError("Cannot construct a S with more than two arguments.")
+		raise TypeError("Cannot construct a S with two arguments.")
 
 	@builtin_function
 	def f__r(self) -> 'any_f':

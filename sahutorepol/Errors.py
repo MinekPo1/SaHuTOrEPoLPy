@@ -7,10 +7,16 @@ class _dotraceback(object):
 	traceback: list['TracebackPoint']
 	str_type: ClassVar[str] = "Unassigned"
 
-	def __init__(self,message: str,pos: tuple):
+	def __init__(self,message: str,pos: tuple | None = None):
 		self.message = message
-		self.pos = pos
+		self._pos = pos
 		self.traceback = []
+
+	@property
+	def pos(self) -> tuple | None:
+		if self._pos is None and len(self.traceback) > 0:
+			return self.traceback[0].pos
+		return self._pos
 
 
 class SaHuTOrEPoLError(_dotraceback,Exception):

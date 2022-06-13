@@ -89,7 +89,7 @@ class AST:
 				value: int
 
 			class f(TypedDict):
-				type: Literal['f']
+				type: Literal['n']
 				value: float
 
 			class b(TypedDict):
