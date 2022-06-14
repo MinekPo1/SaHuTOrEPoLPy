@@ -13,66 +13,11 @@ sys.path.insert(0,str(Path(__file__).parent.parent))
 from sahutorepol import Code, SaHuTOrEPoLError        # noqa: E402
 from sahutorepol import parse                         # noqa: E402
 from sahutorepol.Errors import show_error_or_warning  # noqa: E402
+from sahutorepol.shell import Inject
 import sahutorepol                                    # noqa: E402
 
-
-class IOStealer:
-	@staticmethod
-	def readline():
-		if (iow:=IOWrapper.get()) is None:
-			raise ValueError("No IOWrapper found")
-		return iow.readline()
-
-	@staticmethod
-	def write(s):
-		if (iow:=IOWrapper.get()) is None:
-			raise ValueError("No IOWrapper found")
-		return iow.write(s)
-
-	@staticmethod
-	def flush():
-		if (iow:=IOWrapper.get()) is None:
-			raise ValueError("No IOWrapper found")
-		return iow.flush()
-
-
-T = TypeVar('T', str, bytes)
-
-
-class IOWrapper(Generic[T]):
-	__hidden_var_name = "__hidden_IOWrapper_shh"
-
-	def __init__(self, wrapped_write: IO[T], wrapped_read:Optional[IO[T]] = None)\
-			-> None:
-		# get the outside frame's locals
-		self._loc_ref = _getframe(1).f_locals
-		self.wrapped_write = wrapped_write
-		self.wrapped_read = wrapped_write if wrapped_read is None else wrapped_read
-
-	def __enter__(self):
-		# add self to the outside locals
-		self.prev = self._loc_ref.get(self.__hidden_var_name,None)
-		self._loc_ref[self.__hidden_var_name] = self
-		return self
-
-	def __exit__(self, exc_type, exc_val, exc_tb):
-		# remove self from the outside locals
-		self._loc_ref[self.__hidden_var_name] = self.prev
-
-	def readline(self) -> T:
-		return self.wrapped_read.readline()
-
-	def write(self, s: T):
-		self.wrapped_write.write(s)
-
-	@classmethod
-	def get(cls) -> 'IOWrapper | None':
-		frame = _getframe(1)
-		while cls.__hidden_var_name not in frame.f_locals:
-			frame = frame.f_back
-			if frame is None:
-				return None
-		return frame.f_locals[cls.__hidden_var_name]
+IOStealer = Inject.IOStealer
+IOWrapper = Inject.IOWrapper
 
 
 def run(fname: str | Path):
@@ -132,9 +77,9 @@ class GenericTests(unittest.TestCase):
 							case _:
 								raise ValueError("Unknown @ directive")
 						continue
-					if j.startswith("[") and j.endswith("]"):
-						j = j[1:-1]
 					if j:
+						if j.startswith("[") and j.endswith("]"):
+							j = j[1:-1]
 						self.assertEqual(j,subtest_o.readline().rstrip("\n"))
 
 

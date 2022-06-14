@@ -1,4 +1,5 @@
-from typing import IO
+from sys import _getframe
+from typing import IO, Generic, Optional, TypeVar
 from sahutorepol import SaHuTOrEPoLWarning
 from sahutorepol import Types
 from sahutorepol.Errors import (
@@ -9,6 +10,8 @@ from simple_warnings import catch_warnings
 
 from sahutorepol.main import parse, NamespaceContext, Code, parse_expr
 
+
+T = TypeVar('T', str, bytes)
 
 class Shell:
 	write_to: None | IO[str]
@@ -69,7 +72,7 @@ class Shell:
 		# a while loop or a if statement
 		finished = True
 		namespace_context = self.namespace  # so the namespace is able to find itself
-		namespace_context
+		_ = namespace_context
 
 		# start of function or method definition
 		# essentials checks for this: `$*+(*+)`
@@ -150,3 +153,57 @@ class Shell:
 
 	def read_lines(self):
 		return self.output_buffer.pop(0)
+
+
+class Inject:
+	class IOStealer:
+		@staticmethod
+		def readline():
+			if (iow:=Inject.IOWrapper.get()) is None:
+				raise ValueError("No IOWrapper found")
+			return iow.readline()
+
+		@staticmethod
+		def write(s):
+			if (iow:=Inject.IOWrapper.get()) is None:
+				raise ValueError("No IOWrapper found")
+			return iow.write(s)
+
+		@staticmethod
+		def flush():
+			pass
+
+	class IOWrapper(Generic[T]):
+		__hidden_var_name = "__hidden_IOWrapper_shh"
+
+		def __init__(self, wrapped_write: IO[T], wrapped_read:Optional[IO[T]] = None)\
+				-> None:
+			# get the outside frame's locals
+			self._loc_ref = _getframe(1).f_locals
+			self.wrapped_write = wrapped_write
+			self.wrapped_read = wrapped_write if wrapped_read is None else wrapped_read
+
+		def __enter__(self):
+			# add self to the outside locals
+			self.prev = self._loc_ref.get(self.__hidden_var_name,None)
+			self._loc_ref[self.__hidden_var_name] = self
+			return self
+
+		def __exit__(self, exc_type, exc_val, exc_tb):
+			# remove self from the outside locals
+			self._loc_ref[self.__hidden_var_name] = self.prev
+
+		def readline(self) -> T:
+			return self.wrapped_read.readline()
+
+		def write(self, s: T):
+			self.wrapped_write.write(s)
+
+		@classmethod
+		def get(cls) -> 'Inject.IOWrapper | None':
+			frame = _getframe(1)
+			while cls.__hidden_var_name not in frame.f_locals:
+				frame = frame.f_back
+				if frame is None:
+					return None
+			return frame.f_locals[cls.__hidden_var_name]

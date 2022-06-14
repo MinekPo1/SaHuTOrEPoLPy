@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import re
-from typing import IO, TYPE_CHECKING, Any, Callable, ClassVar, Generic,\
+from typing import IO, TYPE_CHECKING, Any, Callable, ClassVar, Generator, Generic,\
 	Literal, Optional, Protocol, Type as LType, TypeVar, overload
 from typing import TypeAlias
 from sahutorepol.Errors import SaHuTOrEPoLError, TracebackHint
@@ -1067,7 +1067,7 @@ class RuntimeMethodOrFunction(MethodOrFunction):
 	def iter(
 			self, *args, namespace_hook: Callable[[NamespaceContext],None] | None = None,
 			do_iter: bool = False
-		) -> None:
+		) -> Generator:
 		# check if the function is being called with the correct number of arguments
 		if len(args) != len(self.args):
 			raise ValueError(

@@ -1,4 +1,4 @@
-from typing import Generator, Generic, Iterable, Literal, TypeVar, overload
+from typing import Any, Generator, Generic, Literal, TypeVar, overload
 import re
 
 from simple_warnings import warn
@@ -141,13 +141,16 @@ class Code(Generic[TContext]):
 		self.ast = ast
 
 	@classmethod
-	def resolve_expr(cls,expr: TypeHints.AST.Expression) -> Types.TypeLike:
+	def _resolve_expr(cls,expr: TypeHints.AST.Expression) -> Generator[Any, None, Types.TypeLike]:
 		context: NamespaceContext
 		context = NamespaceContext.get_current_context()
 		with TracebackHint(expr['pos']):
 			match expr:
 				case {"type": "multi_expression", "expressions": list(e)}:
-					elements = [cls.resolve_expr(i) for i in e]
+					elements = []
+					for i in e:
+						temp = yield from cls._resolve_expr(i)
+						elements.append(temp)
 					if isinstance(elements[0], Types.MethodOrFunction):
 						raise SaHuTOrEPoLError(
 							"Cannot create a function or method inside of a multi expression.",
@@ -173,8 +176,11 @@ class Code(Generic[TContext]):
 						) from ex
 				case {"type": "literal_expression", "value": value}:
 					return context.types[value['type']](value['value'])  # type:ignore
-				case {"type":"function_call", "name": name, "args": list(args)}:
-					args = [cls.resolve_expr(i) for i in args]
+				case {"type":"function_call", "name": name, "args": list(oargs)}:
+					args = []
+					for i in oargs:
+						temp = yield from cls._resolve_expr(i)
+						args.append(temp)
 					f: Types.BoundMethodOrFunction[Types.f,Types.Type] \
 						| Types.f | Types.BuiltinFunction
 					try:
@@ -207,8 +213,11 @@ class Code(Generic[TContext]):
 							ex.args[0],
 							expr['pos']
 						) from ex
-				case {"type":"constructor_call", "name": name, "args": list(args)}:
-					args = [cls.resolve_expr(i) for i in args]
+				case {"type":"constructor_call", "name": name, "args": list(oargs)}:
+					args = []
+					for i in oargs:
+						temp = yield from cls._resolve_expr(i)
+						args.append(temp)
 					try:
 						c = context.types[name]
 					except KeyError as ex:
@@ -221,14 +230,32 @@ class Code(Generic[TContext]):
 							f"Type {name!r} cannot be instantiated with arguments",
 							expr['pos']
 						)
+					if isinstance(c.__init__,Types.RuntimeMethodOrFunction):
+						temp = yield from c.__init__.iter(*args)
+						return temp
 					return c(*args)
 
 				case _:
 					raise SaHuTOrEPoLError(f"Unknown expression type {expr}", expr['pos'])
 
 	@classmethod
-	def _run(cls,ast: TypeHints.AST.Contexts) -> Generator:
+	def resolve_expr(cls,expr: TypeHints.AST.Expression) -> Types.TypeLike:
+		with TracebackHint(expr['pos']), NamespaceContext():
+			gen = cls._resolve_expr(expr)
+			try:
+				next(gen)
+			except StopIteration as ex:
+				return ex.value
+			else:
+				raise RuntimeError("Unexpectedly did not raise StopIteration")
+
+	@classmethod
+	def _run(cls,ast: TypeHints.AST.Contexts, file: str | None = None) -> Generator:
 		context = NamespaceContext.get_current_context()
+		if "file" in ast:
+			file = ast['file']  # type:ignore
+		if file is None:
+			raise SaHuTOrEPoLError("No file specified", ast['pos'])
 		import_vars: dict[str,dict[str,Types.TypeLike | type[Types.Type]]] = {}
 		if (imports := (ast.get('imports',None))) is not None:
 			for k,v in imports.items():
@@ -236,7 +263,7 @@ class Code(Generic[TContext]):
 						NamespaceContext(True) as import_np,
 						TracebackPoint(v['pos']), TracebackHint((0,0),k)
 					):
-					cls._run(v)
+					yield from cls._run(v,file)
 					import_vars[k] = import_np.vars._g_vars
 					import_vars[k].update(import_np.types._types)
 
@@ -245,7 +272,7 @@ class Code(Generic[TContext]):
 			for k,v in td.items():
 				if isinstance(v,TypeHints.AST.TypeDef):
 					with NamespaceContext(True) as type_ns:
-						cls._run(v)
+						yield from cls._run(v,file)
 					context.types[k] = type(
 						f"RuntimeType[{k}]",(Types.Type,),type_ns.vars._vars
 					)
@@ -288,7 +315,7 @@ class Code(Generic[TContext]):
 								context.vars.define(name,Types.f(Code(i),args))
 							else:
 								context.vars.define(name,Types.m(Code(i),args))
-						case {"type": "method_call", "name": name, "args": list(args)}:
+						case {"type": "method_call", "name": name, "args": list(oargs)}:
 							v,t = check_var_name(name)
 							if t is None:
 								raise SaHuTOrEPoLError("Invalid type name",i['pos'])
@@ -298,11 +325,14 @@ class Code(Generic[TContext]):
 								(Types.f,Types.BuiltinFunction,Types.m,Types.BuiltinMethod)
 							) and not(callable(f)):
 								raise SaHuTOrEPoLError(f"{f!r} is not callable",i['pos'])
-							args = [cls.resolve_expr(i) for i in args]
+							args = []
+							for i in oargs:
+								temp = yield from cls._resolve_expr(i)
+								args.append(temp)
 							try:
 								with TracebackPoint(i['pos']):
-									if isinstance(f,Types.RuntimeMethodOrFunction):
-										yield from f.iter(args)
+									if hasattr(f,"iter"):
+										yield from f.iter(args)  # type:ignore
 									else:
 										f(*args)
 							except SaHuTOrEPoLError as e:
@@ -310,13 +340,16 @@ class Code(Generic[TContext]):
 							except Exception as e:
 								raise SaHuTOrEPoLError(f"{e}",i['pos']) from e
 						case {"type": "while", "expression": condition}:
-							while cls.resolve_expr(condition):
-								yield from cls._run(i)
+							v = yield from cls._resolve_expr(condition)
+							while Types.b(v).value:
+								yield from cls._run(i,file)
+								v = yield from cls._resolve_expr(condition)
 						case {"type": "if", "expression": condition}:
-							if cls.resolve_expr(condition):
-								yield from cls._run(i)
+							v = yield from cls._resolve_expr(condition)
+							if Types.b(v).value:
+								yield from cls._run(i,file)
 						case {"type": "var_set", "name": name, "value": value}:
-							v = cls.resolve_expr(value)
+							v = yield from cls._resolve_expr(value)
 							_,t = check_var_name(name)
 							if not(isinstance(v,context.types[t])):
 								v = Types.Type.convert(v,context.types[t])
@@ -345,7 +378,8 @@ class Code(Generic[TContext]):
 					raise SaHuTOrEPoLKeyBoardInterrupt(
 						"Program interrupted by user",i['pos']
 						) from ex
-			yield None
+				# yield the current position and file
+				yield i['pos'],file
 
 	def run(self) -> None:
 		file = self.ast.get("file",None)
@@ -356,10 +390,8 @@ class Code(Generic[TContext]):
 				pass
 
 	def __iter__(self) -> Generator:
-		# manually enter the namespace context and traceback hint
-		Types.NamespaceContext().__enter__()
-		TracebackHint(self.ast['pos'],self.ast['file']).__enter__()
-		return self._run(self.ast)
+		with Types.NamespaceContext(), TracebackHint(self.ast['pos'],self.ast['file']):
+			yield from self._run(self.ast)
 
 	@property
 	def pos(self) -> tuple[int,int]:
@@ -487,7 +519,7 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 			args = []
 		else:
 			try:
-				args = list(split_expr(m.group(3),"|"))
+				args = list(split_expr(m.group(3),","))
 			except ValueError as ex:
 				raise SaHuTOrEPoLError(ex.args[0],pos) from ex
 		if m.group(3):
@@ -940,6 +972,7 @@ def parse(code:str, file_name: str, do_resolve: bool = True)\
 					'args': args,
 					'children': [],
 					'pos': ptr.pos,
+					"file": tree["file"]
 				})
 				context.append(context[-1]['children'][-1])  # type:ignore
 				symbol = ""

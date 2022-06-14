@@ -41,6 +41,7 @@ class AST:
 		type: Literal['func_def']
 		name: str
 		args: list[str]
+		file: str
 
 	class VarInclude(Element):
 		type: Literal['var_inc']

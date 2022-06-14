@@ -2,17 +2,61 @@ import functools
 from pathlib import Path
 import sys
 from typing import IO
+import io
 import click
 from sahutorepol.main import LibraryPath
-from sahutorepol.shell import Shell
+from sahutorepol.shell import Shell, Inject
 from simple_warnings import catch_warnings, print_warning
 import yaml
 import json
 
-from sahutorepol import Code, SaHuTOrEPoLError, SaHuTOrEPoLWarning, parse
+from sahutorepol import Code, SaHuTOrEPoLError, SaHuTOrEPoLWarning, parse, S
 from sahutorepol.Errors import (
 	SaHuTOrEPoLKeyBoardInterrupt, show_error_or_warning
 )
+
+
+# from https://stackoverflow.com/a/510364/12469275
+class _Getch:
+	"""Gets a single character from standard input.  Does not echo to the
+	screen."""
+	def __init__(self):
+		try:
+			self.impl = _GetchWindows()
+		except ImportError:
+			self.impl = _GetchUnix()
+
+	def __call__(self):
+		return self.impl()
+
+
+class _GetchUnix:
+	def __init__(self):
+		import tty
+
+	def __call__(self):
+		import tty, termios
+		fd = sys.stdin.fileno()
+		old_settings = termios.tcgetattr(fd)
+		try:
+			tty.setraw(sys.stdin.fileno())
+			ch = sys.stdin.read(1)
+		finally:
+			termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+		return ch
+
+
+class _GetchWindows:
+	def __init__(self):
+		import msvcrt
+
+	def __call__(self):
+		import msvcrt
+		return msvcrt.getch()
+
+
+getch = _Getch()
+
 
 help_s = {
 tuple(): """
@@ -358,6 +402,74 @@ def run(ctx:click.Context,t):
 	with catch_warnings(record=True) as w:
 		try:
 			Code(t).run()
+		except (SaHuTOrEPoLError,SaHuTOrEPoLKeyBoardInterrupt) as ex:
+			if do_raise:
+				raise ex from ex
+			show_error_or_warning(ex)
+			sys.exit(1)
+	if not silent:
+		for warning in w:
+			if isinstance(warning,SaHuTOrEPoLWarning):
+				show_error_or_warning(warning)
+			else:
+				print_warning(warning)
+	if w.warnings and strict:
+		sys.exit(1)
+
+
+@cli.command("debug")
+@click.option(
+	"--out-height", "-h", type=int, default=16,
+)
+@parse_command
+def debug(ctx:click.Context,t,out_height:int):
+	do_raise = ctx.obj["raise"]
+	silent   = ctx.obj["silent"]
+	strict   = ctx.obj["strict"]
+	# inject into stdin and stdout
+	S.stdin  = Inject.IOStealer()  # type:ignore
+	S.stdout = Inject.IOStealer()  # type:ignore
+
+	# create the input manager
+	class InputManager:
+		def readline(self):
+			# go to the bottom of the screen
+			S.stdout.write("\x1b[{}A".format(out_height))
+			# print the prompt
+			print(": ",end="",flush=True)
+			# read the input
+			return input()
+
+	im = InputManager()
+	o  = io.StringIO()
+
+	# clear the screen
+	print("\033[2J\033[1;1H",end="")
+
+	with catch_warnings(record=True) as w:
+		try:
+			with Inject.IOWrapper(o,im):
+				for i in Code(t):
+					# clear the console
+					print("\033[2J\033[1;1H",end="")
+
+					# print the last something lines of the output
+					print(*o.getvalue().splitlines()[-out_height:],sep="\n")
+
+					# pad the output with empty lines
+					for _ in range(max(out_height - len(o.getvalue().splitlines()),0)):
+						print()
+
+
+					print()
+					print(i[1].replace('\\','/').split('/')[-1]+f":{i[0]}")
+
+					print(":",end="",flush=True)
+					c = getch()
+					if (c == b"\x03"    # ctrl-c
+					 or c == b"\x1a"):  # ctrl-d
+						raise KeyboardInterrupt
+
 		except (SaHuTOrEPoLError,SaHuTOrEPoLKeyBoardInterrupt) as ex:
 			if do_raise:
 				raise ex from ex
