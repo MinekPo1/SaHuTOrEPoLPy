@@ -798,7 +798,7 @@ class n(Type):
 	def _f_s(self) -> 'any_f':
 		@builtin_function
 		def f__f(f__f: 'any_f') -> 'any_f':
-			f__f(self.convert(str(self.value),s))
+			f__f(self.convert(str(self.value).replace(".",","),s))
 			return f()
 
 		return f__f
