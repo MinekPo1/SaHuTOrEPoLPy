@@ -502,10 +502,10 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 		if m.group(2) is None:
 			args = []
 		else:
-			if m.group(2).count(",") >= 2:
+			if m.group(2).count("|") >= 2:
 				raise SaHuTOrEPoLError("Too many arguments",pos)
 			try:
-				args = list(split_expr(m.group(2),","))
+				args = list(split_expr(m.group(2),"|"))
 			except ValueError as ex:
 				raise SaHuTOrEPoLError(ex.args[0],pos) from ex
 		return {
@@ -519,7 +519,7 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 			args = []
 		else:
 			try:
-				args = list(split_expr(m.group(3),","))
+				args = list(split_expr(m.group(3),"|"))
 			except ValueError as ex:
 				raise SaHuTOrEPoLError(ex.args[0],pos) from ex
 		if m.group(3):
@@ -950,7 +950,7 @@ def parse(code:str, file_name: str, do_resolve: bool = True)\
 						f"Invalid variable type {t!r}",
 						ptr.pos
 					)
-				args = [i.strip() for i in args.split(",")]
+				args = [i.strip() for i in args.split("|")]
 				for i in args:
 					av,at = check_var_name(i)
 					if at is None:
