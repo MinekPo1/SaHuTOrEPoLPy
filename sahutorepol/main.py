@@ -498,22 +498,6 @@ def parse_expr(expr:str,pos: tuple[int,int]) -> TypeHints.AST.Expression:
 			'name': expr,
 			'pos': pos
 		}
-	if m:=re.fullmatch(rf"({RegexBank.type_name})\((.*)\)",expr):
-		if m.group(2) is None:
-			args = []
-		else:
-			if m.group(2).count("|") >= 2:
-				raise SaHuTOrEPoLError("Too many arguments",pos)
-			try:
-				args = list(split_expr(m.group(2),"|"))
-			except ValueError as ex:
-				raise SaHuTOrEPoLError(ex.args[0],pos) from ex
-		return {
-			'type': 'constructor_call',
-			'name': m.group(1),
-			'args': [parse_expr(i,pos) for i in args],
-			'pos': pos
-		}
 	if m:=re.fullmatch(rf"({RegexBank.variable})\((.*)\)",expr):
 		if m.group(3) is None:
 			args = []
